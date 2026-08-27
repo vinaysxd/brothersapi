@@ -1,0 +1,29 @@
+import express from "express"; 
+import helmet from "helmet";
+import cors from "cors";
+import rateLimit from "express-rate-limit";
+import morgan from "morgan";
+import dotenv from "dotenv";
+ 
+dotenv.config();
+
+const app = express();
+app.use(helmet());
+app.use(cors({origin: process.env.ALLOWED_ORIGIN}))
+app.use(rateLimit({windowMs: 15*60*1000, max: 100}));
+
+app.use(morgan());
+
+app.use(express.json());
+
+app.get("/", (req, res) => {
+  res.json({
+    message: "API is running"
+  });
+});
+
+const PORT = 3000;
+
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+});
