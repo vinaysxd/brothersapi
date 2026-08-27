@@ -12,7 +12,7 @@ app.use(helmet());
 app.use(cors({origin: process.env.ALLOWED_ORIGIN}))
 app.use(rateLimit({windowMs: 15*60*1000, max: 100}));
 
-app.use(morgan());
+app.use(morgan("dev"));
 
 app.use(express.json());
 
@@ -24,6 +24,10 @@ app.get("/", (req, res) => {
 
 const PORT = 3000;
 
-app.listen(PORT, () => {
+export const server = app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
+
+export default app;
+
+  
