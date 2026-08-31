@@ -10,6 +10,7 @@ jest.mock("../config/supabase.js", () => ({
       getUser: jest.fn(),
       admin: {
         inviteUserByEmail: jest.fn(),
+        updateUserById: jest.fn(),
       },
     },
     from: jest.fn(),
@@ -49,6 +50,7 @@ describe("POST /invite", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     app = buildApp();
+    supabase.auth.admin.updateUserById.mockResolvedValue({ error: null });
   });
 
   it("blocks requests with no token", async () => {
@@ -196,7 +198,7 @@ describe("POST /invite", () => {
     expect(supabase.from).toHaveBeenCalledWith("profiles");
     expect(supabase.from).toHaveBeenCalledWith("staff_profile");
     expect(supabase.from).not.toHaveBeenCalledWith("client_profile");
-    expect(insertMock).toHaveBeenCalledWith({ id: "new-staff-1" });
+    expect(insertMock).toHaveBeenCalledWith({ profile_id: "new-staff-1" });
   });
 
   it("creates a client user: profiles + client_profile", async () => {

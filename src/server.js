@@ -1,4 +1,5 @@
 import "dotenv/config";
+import path from "node:path";
 import express from "express";
 import helmet from "helmet";
 import cors from "cors";
@@ -6,6 +7,17 @@ import rateLimit from "express-rate-limit";
 import morgan from "morgan";
 import adminRoutes from "./routes/admin.js";
 import authRoutes from "./routes/auth.js";
+import dashboardRoutes from "./routes/dashboard.js";
+
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught Exception:", err);
+  process.exit(1);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled Rejection:", reason);
+  process.exit(1);
+});
 
 const app = express();
 app.use(helmet());
@@ -15,6 +27,7 @@ app.use(rateLimit({windowMs: 15*60*1000, max: 100}));
 app.use(morgan("dev"));
 
 app.use(express.json());
+app.use(express.static(path.join(process.cwd(), "src", "public")));
 
 app.get("/", (req, res) => {
   res.json({
@@ -23,6 +36,7 @@ app.get("/", (req, res) => {
 });
 
 app.use("/admin", adminRoutes);
+app.use("/admin", dashboardRoutes);
 app.use("/auth", authRoutes);
 
 const PORT = 3000;

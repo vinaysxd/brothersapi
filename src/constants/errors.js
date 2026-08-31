@@ -4,6 +4,7 @@ export const ERRORS = {
   AUTH_INVALID_TOKEN: { code: "AUTH_002", message: "Invalid or expired token" },
   AUTH_UNAUTHORIZED: { code: "AUTH_003", message: "Unauthorized access" },
   AUTH_INVALID_CREDENTIALS: { code: "AUTH_004", message: "Invalid email or password" },
+  AUTH_INVALID_REFRESH_TOKEN: { code: "AUTH_005", message: "Invalid or expired refresh token" },
 
   // Validation
   VALIDATION_ERROR: { code: "VAL_001", message: "Validation error" },

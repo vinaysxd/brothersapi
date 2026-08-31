@@ -30,7 +30,7 @@ router.post(
     const { email, role, full_name, phone } = req.body;
 
     const { data: inviteData, error: inviteError } =
-      await supabase.auth.admin.inviteUserByEmail(email, { data: { role } });
+      await supabase.auth.admin.inviteUserByEmail(email);
 
     if (inviteError || !inviteData?.user) {
       if (inviteError?.message?.toLowerCase().includes("already")) {
@@ -40,6 +40,14 @@ router.post(
     }
 
     const userId = inviteData.user.id;
+
+    const { error: roleError } = await supabase.auth.admin.updateUserById(userId, {
+      app_metadata: { role },
+    });
+
+    if (roleError) {
+      return res.status(500).json(ERRORS.SERVER_ERROR);
+    }
 
     const { error: profileError } = await supabase.from("profiles").insert({
       id: userId,
@@ -56,7 +64,7 @@ router.post(
     if (role === "staff") {
       const { error: staffError } = await supabase
         .from("staff_profile")
-        .insert({ id: userId });
+        .insert({ profile_id: userId });
 
       if (staffError) {
         return res.status(500).json(ERRORS.SERVER_ERROR);
