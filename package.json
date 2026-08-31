@@ -4,13 +4,13 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-  "start": "node server.js",
+  "start": "node src/server.ts",
   "test": "jest --watchAll"
 },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",
     "@types/cors": "^2.8.19",

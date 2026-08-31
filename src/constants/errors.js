@@ -3,6 +3,7 @@ export const ERRORS = {
   AUTH_NO_TOKEN: { code: "AUTH_001", message: "No token provided" },
   AUTH_INVALID_TOKEN: { code: "AUTH_002", message: "Invalid or expired token" },
   AUTH_UNAUTHORIZED: { code: "AUTH_003", message: "Unauthorized access" },
+  AUTH_INVALID_CREDENTIALS: { code: "AUTH_004", message: "Invalid email or password" },
 
   // Validation
   VALIDATION_ERROR: { code: "VAL_001", message: "Validation error" },

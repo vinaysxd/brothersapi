@@ -1,11 +1,11 @@
-import express from "express"; 
+import "dotenv/config";
+import express from "express";
 import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import morgan from "morgan";
-import dotenv from "dotenv";
- 
-dotenv.config();
+import adminRoutes from "./routes/admin.js";
+import authRoutes from "./routes/auth.js";
 
 const app = express();
 app.use(helmet());
@@ -22,6 +22,9 @@ app.get("/", (req, res) => {
   });
 });
 
+app.use("/admin", adminRoutes);
+app.use("/auth", authRoutes);
+
 const PORT = 3000;
 
 export const server = app.listen(PORT, () => {
@@ -30,4 +33,3 @@ export const server = app.listen(PORT, () => {
 
 export default app;
 
-  
