@@ -74,7 +74,7 @@ router.post(
     if (role === "client") {
       const { error: clientError } = await supabase
         .from("client_profile")
-        .insert({ id: userId });
+        .insert({ profile_id: userId });
 
       if (clientError) {
         return res.status(500).json(ERRORS.SERVER_ERROR);

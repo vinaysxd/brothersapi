@@ -195,10 +195,34 @@ describe("POST /invite", () => {
       phone: validBody.phone,
       role: "staff",
     });
+    expect(supabase.auth.admin.inviteUserByEmail).toHaveBeenCalledWith(validBody.email);
+    expect(supabase.auth.admin.updateUserById).toHaveBeenCalledWith("new-staff-1", {
+      app_metadata: { role: "staff" },
+    });
     expect(supabase.from).toHaveBeenCalledWith("profiles");
     expect(supabase.from).toHaveBeenCalledWith("staff_profile");
     expect(supabase.from).not.toHaveBeenCalledWith("client_profile");
     expect(insertMock).toHaveBeenCalledWith({ profile_id: "new-staff-1" });
+  });
+
+  it("returns 500 when setting app_metadata role fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.auth.admin.inviteUserByEmail.mockResolvedValue({
+      data: { user: { id: "new-staff-3" } },
+      error: null,
+    });
+    supabase.auth.admin.updateUserById.mockResolvedValue({
+      error: { message: "update failed" },
+    });
+
+    const res = await request(app)
+      .post("/invite")
+      .set(headers)
+      .send(validBody);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+    expect(supabase.from).not.toHaveBeenCalled();
   });
 
   it("creates a client user: profiles + client_profile", async () => {
@@ -221,6 +245,7 @@ describe("POST /invite", () => {
     expect(supabase.from).toHaveBeenCalledWith("profiles");
     expect(supabase.from).toHaveBeenCalledWith("client_profile");
     expect(supabase.from).not.toHaveBeenCalledWith("staff_profile");
+    expect(insertMock).toHaveBeenCalledWith({ profile_id: "new-client-1" });
   });
 
   it("returns 500 when inserting into staff_profile fails", async () => {

@@ -126,4 +126,25 @@ describe("POST /login", () => {
       },
     });
   });
+
+  it("always includes role in the response, as null when app_metadata has no role", async () => {
+    supabase.auth.signInWithPassword.mockResolvedValue({
+      data: {
+        user: {
+          id: "user-1",
+          email: validBody.email,
+          app_metadata: {},
+        },
+        session: {
+          access_token: "jwt-access-token",
+        },
+      },
+      error: null,
+    });
+
+    const res = await request(app).post("/login").send(validBody);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.user).toHaveProperty("role", null);
+  });
 });
