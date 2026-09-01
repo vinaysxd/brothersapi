@@ -27,6 +27,9 @@ export const ERRORS = {
   ATTENDANCE_PHOTO_ALREADY_EXISTS: { code: "ATT_007", message: "After photo already uploaded for this pair" },
   ATTENDANCE_ALREADY_CLOSED: { code: "ATT_008", message: "Attendance is already clocked out" },
 
+  // Site Notes
+  SITE_NOTE_NOT_FOUND: { code: "NTE_001", message: "Note not found" },
+
   // General
   SERVER_ERROR: { code: "SRV_001", message: "Internal server error" },
   NOT_FOUND: { code: "SRV_002", message: "Resource not found" },
