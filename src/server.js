@@ -9,6 +9,7 @@ import adminRoutes from "./routes/admin.js";
 import authRoutes from "./routes/auth.js";
 import dashboardRoutes from "./routes/dashboard.js";
 import profileRoutes from "./routes/profile.js";
+import sitesRoutes from "./routes/sites.js";
 
 process.on("uncaughtException", (err) => {
   console.error("Uncaught Exception:", err);
@@ -40,6 +41,7 @@ app.use("/admin", adminRoutes);
 app.use("/admin", dashboardRoutes);
 app.use("/auth", authRoutes);
 app.use("/profile", profileRoutes);
+app.use("/sites", sitesRoutes);
 
 const PORT = 3000;
 

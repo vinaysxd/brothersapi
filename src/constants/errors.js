@@ -15,6 +15,7 @@ export const ERRORS = {
 
   // Site
   SITE_NOT_FOUND: { code: "STE_001", message: "Site not found" },
+  SITE_STAFF_ALREADY_ASSIGNED: { code: "STE_002", message: "Staff already assigned to this site" },
 
   // Attendance
   ATTENDANCE_OUT_OF_RANGE: { code: "ATT_001", message: "You are not within 100 metres of the site" },
