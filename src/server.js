@@ -12,6 +12,7 @@ import profileRoutes from "./routes/profile.js";
 import sitesRoutes from "./routes/sites.js";
 import attendanceRoutes from "./routes/attendance.js";
 import notesRoutes from "./routes/notes.js";
+import { errorHandler } from "./middleware/errorHandler.js";
 
 process.on("uncaughtException", (err) => {
   console.error("Uncaught Exception:", err);
@@ -46,6 +47,8 @@ app.use("/profile", profileRoutes);
 app.use("/sites", sitesRoutes);
 app.use("/attendance", attendanceRoutes);
 app.use("/notes", notesRoutes);
+
+app.use(errorHandler);
 
 const PORT = 3000;
 
