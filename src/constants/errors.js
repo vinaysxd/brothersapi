@@ -22,6 +22,10 @@ export const ERRORS = {
   ATTENDANCE_ALREADY_CLOCKED_IN: { code: "ATT_002", message: "Already clocked in" },
   ATTENDANCE_NOT_CLOCKED_IN: { code: "ATT_003", message: "Not clocked in" },
   ATTENDANCE_PHOTO_PAIR_REQUIRED: { code: "ATT_004", message: "Before and after photos are required" },
+  ATTENDANCE_NOT_FOUND: { code: "ATT_005", message: "Attendance record not found" },
+  ATTENDANCE_PHOTO_NOT_FOUND: { code: "ATT_006", message: "Attendance photo not found" },
+  ATTENDANCE_PHOTO_ALREADY_EXISTS: { code: "ATT_007", message: "After photo already uploaded for this pair" },
+  ATTENDANCE_ALREADY_CLOSED: { code: "ATT_008", message: "Attendance is already clocked out" },
 
   // General
   SERVER_ERROR: { code: "SRV_001", message: "Internal server error" },
