@@ -44,6 +44,18 @@ const mockInsert = (error = null) =>
     insert: jest.fn().mockResolvedValue({ error }),
   });
 
+const chain = (result) => {
+  const builder = {};
+  builder.select = jest.fn(() => builder);
+  builder.update = jest.fn(() => builder);
+  builder.eq = jest.fn(() => builder);
+  builder.in = jest.fn(() => builder);
+  builder.single = jest.fn(() => Promise.resolve(result));
+  builder.maybeSingle = jest.fn(() => Promise.resolve(result));
+  builder.then = (resolve) => resolve(result);
+  return builder;
+};
+
 describe("POST /invite", () => {
   let app;
 
@@ -268,5 +280,773 @@ describe("POST /invite", () => {
 
     expect(res.statusCode).toBe(500);
     expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+});
+
+describe("GET /staff", () => {
+  let app;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    app = buildApp();
+  });
+
+  it("blocks requests with no token", async () => {
+    const res = await request(app).get("/staff");
+
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual(ERRORS.AUTH_NO_TOKEN);
+  });
+
+  it("blocks a non-admin authenticated user", async () => {
+    const headers = asUser(STAFF_USER);
+
+    const res = await request(app).get("/staff").set(headers);
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual(ERRORS.AUTH_UNAUTHORIZED);
+  });
+
+  it("returns 500 when fetching profiles fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).get("/staff").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns an empty list without querying staff_profile when there is no staff", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: [], error: null }));
+
+    const res = await request(app).get("/staff").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ staff: [] });
+    expect(supabase.from).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 500 when fetching staff_profile fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: [{ id: "staff-1", role: "staff" }], error: null }))
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).get("/staff").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns staff joined with staff_profile", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(
+        chain({
+          data: [{ id: "staff-1", full_name: "Staff One", role: "staff" }],
+          error: null,
+        })
+      )
+      .mockReturnValueOnce(
+        chain({
+          data: [{ profile_id: "staff-1", employee_id: "EMP-1" }],
+          error: null,
+        })
+      );
+
+    const res = await request(app).get("/staff").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      staff: [
+        {
+          id: "staff-1",
+          full_name: "Staff One",
+          role: "staff",
+          profile_id: "staff-1",
+          employee_id: "EMP-1",
+        },
+      ],
+    });
+  });
+});
+
+describe("GET /staff/:id", () => {
+  let app;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    app = buildApp();
+  });
+
+  it("blocks requests with no token", async () => {
+    const res = await request(app).get("/staff/staff-1");
+
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual(ERRORS.AUTH_NO_TOKEN);
+  });
+
+  it("blocks a non-admin authenticated user", async () => {
+    const headers = asUser(STAFF_USER);
+
+    const res = await request(app).get("/staff/staff-1").set(headers);
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual(ERRORS.AUTH_UNAUTHORIZED);
+  });
+
+  it("returns 500 when fetching the profile fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).get("/staff/staff-1").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns 404 when the staff member does not exist", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: null }));
+
+    const res = await request(app).get("/staff/staff-1").set(headers);
+
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toEqual(ERRORS.USER_NOT_FOUND);
+  });
+
+  it("returns 500 when fetching staff_profile fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "staff-1", role: "staff" }, error: null }))
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).get("/staff/staff-1").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns the staff member joined with staff_profile", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(
+        chain({ data: { id: "staff-1", full_name: "Staff One", role: "staff" }, error: null })
+      )
+      .mockReturnValueOnce(
+        chain({ data: { profile_id: "staff-1", employee_id: "EMP-1" }, error: null })
+      );
+
+    const res = await request(app).get("/staff/staff-1").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      staff: {
+        id: "staff-1",
+        full_name: "Staff One",
+        role: "staff",
+        profile_id: "staff-1",
+        employee_id: "EMP-1",
+      },
+    });
+  });
+});
+
+describe("PUT /staff/:id", () => {
+  let app;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    app = buildApp();
+  });
+
+  it("blocks requests with no token", async () => {
+    const res = await request(app).put("/staff/staff-1").send({ full_name: "New Name" });
+
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual(ERRORS.AUTH_NO_TOKEN);
+  });
+
+  it("blocks a non-admin authenticated user", async () => {
+    const headers = asUser(STAFF_USER);
+
+    const res = await request(app)
+      .put("/staff/staff-1")
+      .set(headers)
+      .send({ full_name: "New Name" });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual(ERRORS.AUTH_UNAUTHORIZED);
+  });
+
+  it("rejects an empty full_name", async () => {
+    const headers = asUser(ADMIN_USER);
+
+    const res = await request(app).put("/staff/staff-1").set(headers).send({ full_name: "" });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual(ERRORS.VALIDATION_ERROR);
+  });
+
+  it("returns 500 when fetching the existing staff member fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app)
+      .put("/staff/staff-1")
+      .set(headers)
+      .send({ full_name: "New Name" });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns 404 when the staff member does not exist", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: null }));
+
+    const res = await request(app)
+      .put("/staff/staff-1")
+      .set(headers)
+      .send({ full_name: "New Name" });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toEqual(ERRORS.USER_NOT_FOUND);
+  });
+
+  it("returns 500 when updating profiles fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "staff-1", role: "staff" }, error: null }))
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app)
+      .put("/staff/staff-1")
+      .set(headers)
+      .send({ full_name: "New Name" });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns 500 when updating staff_profile fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "staff-1", role: "staff" }, error: null }))
+      .mockReturnValueOnce(
+        chain({ data: { id: "staff-1", full_name: "New Name", role: "staff" }, error: null })
+      )
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app)
+      .put("/staff/staff-1")
+      .set(headers)
+      .send({ full_name: "New Name" });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("updates profiles and staff_profile fields", async () => {
+    const headers = asUser(ADMIN_USER);
+    const profileUpdateChain = chain({
+      data: { id: "staff-1", full_name: "New Name", phone: "1112223333", role: "staff" },
+      error: null,
+    });
+    const staffUpdateChain = chain({
+      data: { profile_id: "staff-1", employee_id: "EMP-2", address: "2 New St" },
+      error: null,
+    });
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "staff-1", role: "staff" }, error: null }))
+      .mockReturnValueOnce(profileUpdateChain)
+      .mockReturnValueOnce(staffUpdateChain);
+
+    const res = await request(app)
+      .put("/staff/staff-1")
+      .set(headers)
+      .send({
+        full_name: "New Name",
+        phone: "1112223333",
+        employee_id: "EMP-2",
+        address: "2 New St",
+      });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      staff: {
+        id: "staff-1",
+        full_name: "New Name",
+        phone: "1112223333",
+        role: "staff",
+        profile_id: "staff-1",
+        employee_id: "EMP-2",
+        address: "2 New St",
+      },
+    });
+    expect(profileUpdateChain.update).toHaveBeenCalledWith({
+      full_name: "New Name",
+      phone: "1112223333",
+    });
+    expect(staffUpdateChain.update).toHaveBeenCalledWith({
+      employee_id: "EMP-2",
+      address: "2 New St",
+    });
+  });
+});
+
+describe("DELETE /staff/:id", () => {
+  let app;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    app = buildApp();
+  });
+
+  it("blocks requests with no token", async () => {
+    const res = await request(app).delete("/staff/staff-1");
+
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual(ERRORS.AUTH_NO_TOKEN);
+  });
+
+  it("blocks a non-admin authenticated user", async () => {
+    const headers = asUser(STAFF_USER);
+
+    const res = await request(app).delete("/staff/staff-1").set(headers);
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual(ERRORS.AUTH_UNAUTHORIZED);
+  });
+
+  it("returns 500 when fetching the staff member fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).delete("/staff/staff-1").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns 404 when the staff member does not exist", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: null }));
+
+    const res = await request(app).delete("/staff/staff-1").set(headers);
+
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toEqual(ERRORS.USER_NOT_FOUND);
+  });
+
+  it("returns 500 when deactivating fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "staff-1" }, error: null }))
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).delete("/staff/staff-1").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("deactivates the staff member successfully", async () => {
+    const headers = asUser(ADMIN_USER);
+    const updateChain = chain({ data: null, error: null });
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "staff-1" }, error: null }))
+      .mockReturnValueOnce(updateChain);
+
+    const res = await request(app).delete("/staff/staff-1").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ message: "Staff deactivated successfully" });
+    expect(updateChain.update).toHaveBeenCalledWith({ is_active: false });
+  });
+});
+
+describe("GET /clients", () => {
+  let app;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    app = buildApp();
+  });
+
+  it("blocks requests with no token", async () => {
+    const res = await request(app).get("/clients");
+
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual(ERRORS.AUTH_NO_TOKEN);
+  });
+
+  it("blocks a non-admin authenticated user", async () => {
+    const headers = asUser(STAFF_USER);
+
+    const res = await request(app).get("/clients").set(headers);
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual(ERRORS.AUTH_UNAUTHORIZED);
+  });
+
+  it("returns 500 when fetching profiles fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).get("/clients").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns an empty list without querying client_profile when there are no clients", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: [], error: null }));
+
+    const res = await request(app).get("/clients").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ clients: [] });
+    expect(supabase.from).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 500 when fetching client_profile fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: [{ id: "client-1", role: "client" }], error: null }))
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).get("/clients").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns clients joined with client_profile", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(
+        chain({
+          data: [{ id: "client-1", full_name: "Client One", role: "client" }],
+          error: null,
+        })
+      )
+      .mockReturnValueOnce(
+        chain({
+          data: [{ profile_id: "client-1", company_name: "Acme Co" }],
+          error: null,
+        })
+      );
+
+    const res = await request(app).get("/clients").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      clients: [
+        {
+          id: "client-1",
+          full_name: "Client One",
+          role: "client",
+          profile_id: "client-1",
+          company_name: "Acme Co",
+        },
+      ],
+    });
+  });
+});
+
+describe("GET /clients/:id", () => {
+  let app;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    app = buildApp();
+  });
+
+  it("blocks requests with no token", async () => {
+    const res = await request(app).get("/clients/client-1");
+
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual(ERRORS.AUTH_NO_TOKEN);
+  });
+
+  it("blocks a non-admin authenticated user", async () => {
+    const headers = asUser(STAFF_USER);
+
+    const res = await request(app).get("/clients/client-1").set(headers);
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual(ERRORS.AUTH_UNAUTHORIZED);
+  });
+
+  it("returns 500 when fetching the profile fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).get("/clients/client-1").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns 404 when the client does not exist", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: null }));
+
+    const res = await request(app).get("/clients/client-1").set(headers);
+
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toEqual(ERRORS.USER_NOT_FOUND);
+  });
+
+  it("returns 500 when fetching client_profile fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "client-1", role: "client" }, error: null }))
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).get("/clients/client-1").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns the client joined with client_profile", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(
+        chain({ data: { id: "client-1", full_name: "Client One", role: "client" }, error: null })
+      )
+      .mockReturnValueOnce(
+        chain({ data: { profile_id: "client-1", company_name: "Acme Co" }, error: null })
+      );
+
+    const res = await request(app).get("/clients/client-1").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      client: {
+        id: "client-1",
+        full_name: "Client One",
+        role: "client",
+        profile_id: "client-1",
+        company_name: "Acme Co",
+      },
+    });
+  });
+});
+
+describe("PUT /clients/:id", () => {
+  let app;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    app = buildApp();
+  });
+
+  it("blocks requests with no token", async () => {
+    const res = await request(app).put("/clients/client-1").send({ full_name: "New Name" });
+
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual(ERRORS.AUTH_NO_TOKEN);
+  });
+
+  it("blocks a non-admin authenticated user", async () => {
+    const headers = asUser(STAFF_USER);
+
+    const res = await request(app)
+      .put("/clients/client-1")
+      .set(headers)
+      .send({ full_name: "New Name" });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual(ERRORS.AUTH_UNAUTHORIZED);
+  });
+
+  it("rejects an empty company_name", async () => {
+    const headers = asUser(ADMIN_USER);
+
+    const res = await request(app)
+      .put("/clients/client-1")
+      .set(headers)
+      .send({ company_name: "" });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual(ERRORS.VALIDATION_ERROR);
+  });
+
+  it("returns 500 when fetching the existing client fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app)
+      .put("/clients/client-1")
+      .set(headers)
+      .send({ full_name: "New Name" });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns 404 when the client does not exist", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: null }));
+
+    const res = await request(app)
+      .put("/clients/client-1")
+      .set(headers)
+      .send({ full_name: "New Name" });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toEqual(ERRORS.USER_NOT_FOUND);
+  });
+
+  it("returns 500 when updating profiles fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "client-1", role: "client" }, error: null }))
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app)
+      .put("/clients/client-1")
+      .set(headers)
+      .send({ full_name: "New Name" });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns 500 when updating client_profile fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "client-1", role: "client" }, error: null }))
+      .mockReturnValueOnce(
+        chain({ data: { id: "client-1", full_name: "New Name", role: "client" }, error: null })
+      )
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app)
+      .put("/clients/client-1")
+      .set(headers)
+      .send({ full_name: "New Name" });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("updates profiles and client_profile fields", async () => {
+    const headers = asUser(ADMIN_USER);
+    const profileUpdateChain = chain({
+      data: { id: "client-1", full_name: "New Name", role: "client" },
+      error: null,
+    });
+    const clientUpdateChain = chain({
+      data: { profile_id: "client-1", company_name: "New Co", billing_address: "3 Ave" },
+      error: null,
+    });
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "client-1", role: "client" }, error: null }))
+      .mockReturnValueOnce(profileUpdateChain)
+      .mockReturnValueOnce(clientUpdateChain);
+
+    const res = await request(app)
+      .put("/clients/client-1")
+      .set(headers)
+      .send({
+        full_name: "New Name",
+        company_name: "New Co",
+        billing_address: "3 Ave",
+      });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      client: {
+        id: "client-1",
+        full_name: "New Name",
+        role: "client",
+        profile_id: "client-1",
+        company_name: "New Co",
+        billing_address: "3 Ave",
+      },
+    });
+    expect(profileUpdateChain.update).toHaveBeenCalledWith({ full_name: "New Name" });
+    expect(clientUpdateChain.update).toHaveBeenCalledWith({
+      company_name: "New Co",
+      billing_address: "3 Ave",
+    });
+  });
+});
+
+describe("DELETE /clients/:id", () => {
+  let app;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    app = buildApp();
+  });
+
+  it("blocks requests with no token", async () => {
+    const res = await request(app).delete("/clients/client-1");
+
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual(ERRORS.AUTH_NO_TOKEN);
+  });
+
+  it("blocks a non-admin authenticated user", async () => {
+    const headers = asUser(STAFF_USER);
+
+    const res = await request(app).delete("/clients/client-1").set(headers);
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual(ERRORS.AUTH_UNAUTHORIZED);
+  });
+
+  it("returns 500 when fetching the client fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).delete("/clients/client-1").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns 404 when the client does not exist", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: null }));
+
+    const res = await request(app).delete("/clients/client-1").set(headers);
+
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toEqual(ERRORS.USER_NOT_FOUND);
+  });
+
+  it("returns 500 when deactivating fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "client-1" }, error: null }))
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).delete("/clients/client-1").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("deactivates the client successfully", async () => {
+    const headers = asUser(ADMIN_USER);
+    const updateChain = chain({ data: null, error: null });
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "client-1" }, error: null }))
+      .mockReturnValueOnce(updateChain);
+
+    const res = await request(app).delete("/clients/client-1").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ message: "Client deactivated successfully" });
+    expect(updateChain.update).toHaveBeenCalledWith({ is_active: false });
   });
 });
