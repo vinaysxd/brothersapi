@@ -16,6 +16,41 @@ const pick = (source, fields) => {
   return result;
 };
 
+/**
+ * @swagger
+ * /profile/me:
+ *   get:
+ *     summary: Get the current user's combined profile
+ *     tags: [Profile]
+ *     responses:
+ *       200:
+ *         description: The current user's profile, merged with staff_profile or client_profile if applicable
+ *         content:
+ *           application/json:
+ *             schema:
+ *               oneOf:
+ *                 - $ref: '#/components/schemas/StaffProfile'
+ *                 - $ref: '#/components/schemas/ClientProfile'
+ *                 - $ref: '#/components/schemas/Profile'
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       404:
+ *         description: Profile not found
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "USR_001", message: "User not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.get("/me", authenticate, async (req, res) => {
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
@@ -89,6 +124,61 @@ const profileUpdateValidators = [
     .withMessage("contact_person must be a non-empty string"),
 ];
 
+/**
+ * @swagger
+ * /profile/me:
+ *   put:
+ *     summary: Update the current user's profile
+ *     tags: [Profile]
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               full_name: { type: string }
+ *               phone: { type: string }
+ *               avatar_url: { type: string }
+ *               address: { type: string, description: "Staff only" }
+ *               emergency_contact: { type: string, description: "Staff only" }
+ *               company_name: { type: string, description: "Client only" }
+ *               billing_address: { type: string, description: "Client only" }
+ *               contact_person: { type: string, description: "Client only" }
+ *     responses:
+ *       200:
+ *         description: Updated profile, merged with staff_profile or client_profile if applicable
+ *         content:
+ *           application/json:
+ *             schema:
+ *               oneOf:
+ *                 - $ref: '#/components/schemas/StaffProfile'
+ *                 - $ref: '#/components/schemas/ClientProfile'
+ *                 - $ref: '#/components/schemas/Profile'
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "VAL_001", message: "Validation error" }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       404:
+ *         description: Profile not found
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "USR_001", message: "User not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.put("/me", authenticate, profileUpdateValidators, async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {

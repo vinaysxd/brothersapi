@@ -92,6 +92,65 @@ const assignStaffValidators = [
   body("profile_id").isString().trim().notEmpty().withMessage("profile_id is required"),
 ];
 
+/**
+ * @swagger
+ * /sites:
+ *   post:
+ *     summary: Create a new site
+ *     tags: [Sites]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [name, address, latitude, longitude, client_id]
+ *             properties:
+ *               name: { type: string }
+ *               address: { type: string }
+ *               latitude: { type: number, format: float, minimum: -90, maximum: 90 }
+ *               longitude: { type: number, format: float, minimum: -180, maximum: 180 }
+ *               client_id: { type: string, format: uuid, description: "client_profile.id" }
+ *     responses:
+ *       201:
+ *         description: Site created
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 site: { $ref: '#/components/schemas/Site' }
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "VAL_001", message: "Validation error" }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not an admin
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: client_id does not exist
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "USR_001", message: "User not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.post("/", authenticate, requireRole("admin"), siteValidators, async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -124,6 +183,42 @@ router.post("/", authenticate, requireRole("admin"), siteValidators, async (req,
   return res.status(201).json({ site });
 });
 
+/**
+ * @swagger
+ * /sites:
+ *   get:
+ *     summary: List all sites with client details
+ *     tags: [Sites]
+ *     responses:
+ *       200:
+ *         description: List of sites
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 sites:
+ *                   type: array
+ *                   items: { $ref: '#/components/schemas/SiteWithClient' }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not an admin
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.get("/", authenticate, requireRole("admin"), async (req, res) => {
   const { data: sites, error: sitesError } = await supabase.from("sites").select("*");
 
@@ -178,6 +273,42 @@ router.get("/", authenticate, requireRole("admin"), async (req, res) => {
   return res.status(200).json({ sites: sitesWithClient });
 });
 
+/**
+ * @swagger
+ * /sites/my-sites:
+ *   get:
+ *     summary: List active sites the current staff member is assigned to
+ *     tags: [Sites]
+ *     responses:
+ *       200:
+ *         description: List of assigned sites
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 sites:
+ *                   type: array
+ *                   items: { $ref: '#/components/schemas/Site' }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not staff
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.get("/my-sites", authenticate, requireRole("staff"), async (req, res) => {
   const { data: assignments, error: assignmentsError } = await supabase
     .from("site_staff")
@@ -207,6 +338,51 @@ router.get("/my-sites", authenticate, requireRole("staff"), async (req, res) => 
   return res.status(200).json({ sites });
 });
 
+/**
+ * @swagger
+ * /sites/my-sites/{id}:
+ *   get:
+ *     summary: Get a single site the current staff member is assigned to
+ *     tags: [Sites]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Site found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 site: { $ref: '#/components/schemas/Site' }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not staff
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Site not found or not assigned to this staff member
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "STE_001", message: "Site not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.get("/my-sites/:id", authenticate, requireRole("staff"), async (req, res) => {
   const { data: assignment, error: assignmentError } = await supabase
     .from("site_staff")
@@ -240,6 +416,48 @@ router.get("/my-sites/:id", authenticate, requireRole("staff"), async (req, res)
   return res.status(200).json({ site });
 });
 
+/**
+ * @swagger
+ * /sites/client-sites:
+ *   get:
+ *     summary: List the current client's active sites
+ *     tags: [Sites]
+ *     responses:
+ *       200:
+ *         description: List of the client's sites
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 sites:
+ *                   type: array
+ *                   items: { $ref: '#/components/schemas/Site' }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not a client
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Client has no client_profile
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "USR_001", message: "User not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.get("/client-sites", authenticate, requireRole("client"), async (req, res) => {
   const { data: clientProfile, error: clientProfileError } = await supabase
     .from("client_profile")
@@ -268,6 +486,55 @@ router.get("/client-sites", authenticate, requireRole("client"), async (req, res
   return res.status(200).json({ sites });
 });
 
+/**
+ * @swagger
+ * /sites/client-sites/{id}:
+ *   get:
+ *     summary: Get a single site belonging to the current client
+ *     tags: [Sites]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Site found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 site: { $ref: '#/components/schemas/Site' }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not a client
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Client has no client_profile, or site not found / not theirs
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             examples:
+ *               noClientProfile:
+ *                 value: { code: "USR_001", message: "User not found" }
+ *               siteNotFound:
+ *                 value: { code: "STE_001", message: "Site not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.get("/client-sites/:id", authenticate, requireRole("client"), async (req, res) => {
   const { data: clientProfile, error: clientProfileError } = await supabase
     .from("client_profile")
@@ -301,6 +568,51 @@ router.get("/client-sites/:id", authenticate, requireRole("client"), async (req,
   return res.status(200).json({ site });
 });
 
+/**
+ * @swagger
+ * /sites/{id}:
+ *   get:
+ *     summary: Get a single site with client details
+ *     tags: [Sites]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Site found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 site: { $ref: '#/components/schemas/SiteWithClient' }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not an admin
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Site not found
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "STE_001", message: "Site not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.get("/:id", authenticate, requireRole("admin"), async (req, res) => {
   const { data: site, error: siteError } = await supabase
     .from("sites")
@@ -325,6 +637,72 @@ router.get("/:id", authenticate, requireRole("admin"), async (req, res) => {
   return res.status(200).json({ site: { ...site, client } });
 });
 
+/**
+ * @swagger
+ * /sites/{id}:
+ *   put:
+ *     summary: Update a site
+ *     tags: [Sites]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name: { type: string }
+ *               address: { type: string }
+ *               latitude: { type: number, format: float, minimum: -90, maximum: 90 }
+ *               longitude: { type: number, format: float, minimum: -180, maximum: 180 }
+ *               client_id: { type: string, format: uuid, description: "client_profile.id" }
+ *     responses:
+ *       200:
+ *         description: Site updated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 site: { $ref: '#/components/schemas/Site' }
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "VAL_001", message: "Validation error" }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not an admin
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Site not found, or new client_id does not exist
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             examples:
+ *               siteNotFound:
+ *                 value: { code: "STE_001", message: "Site not found" }
+ *               clientNotFound:
+ *                 value: { code: "USR_001", message: "User not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.put("/:id", authenticate, requireRole("admin"), siteUpdateValidators, async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -373,6 +751,51 @@ router.put("/:id", authenticate, requireRole("admin"), siteUpdateValidators, asy
   return res.status(200).json({ site: updatedSite });
 });
 
+/**
+ * @swagger
+ * /sites/{id}:
+ *   delete:
+ *     summary: Delete a site
+ *     tags: [Sites]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Site deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message: { type: string, example: "Site deleted successfully" }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not an admin
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Site not found
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "STE_001", message: "Site not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.delete("/:id", authenticate, requireRole("admin"), async (req, res) => {
   const { data: existingSite, error: fetchError } = await supabase
     .from("sites")
@@ -397,6 +820,76 @@ router.delete("/:id", authenticate, requireRole("admin"), async (req, res) => {
   return res.status(200).json({ message: "Site deleted successfully" });
 });
 
+/**
+ * @swagger
+ * /sites/{id}/assign-staff:
+ *   post:
+ *     summary: Assign a staff member to a site
+ *     tags: [Sites]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [profile_id]
+ *             properties:
+ *               profile_id: { type: string, format: uuid }
+ *     responses:
+ *       201:
+ *         description: Staff assigned successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message: { type: string, example: "Staff assigned successfully" }
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "VAL_001", message: "Validation error" }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not an admin
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Site not found, or profile_id does not exist / is not staff
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             examples:
+ *               siteNotFound:
+ *                 value: { code: "STE_001", message: "Site not found" }
+ *               staffNotFound:
+ *                 value: { code: "USR_001", message: "User not found" }
+ *       409:
+ *         description: Staff already assigned to this site
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "STE_002", message: "Staff already assigned to this site" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.post(
   "/:id/assign-staff",
   authenticate,
@@ -466,6 +959,66 @@ router.post(
   }
 );
 
+/**
+ * @swagger
+ * /sites/{id}/unassign-staff:
+ *   delete:
+ *     summary: Unassign a staff member from a site
+ *     tags: [Sites]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [profile_id]
+ *             properties:
+ *               profile_id: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Staff unassigned successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message: { type: string, example: "Staff unassigned successfully" }
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "VAL_001", message: "Validation error" }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not an admin
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Site not found
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "STE_001", message: "Site not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.delete(
   "/:id/unassign-staff",
   authenticate,

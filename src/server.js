@@ -5,6 +5,8 @@ import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import morgan from "morgan";
+import swaggerUi from "swagger-ui-express";
+import { swaggerSpec } from "./config/swagger.js";
 import adminRoutes from "./routes/admin.js";
 import authRoutes from "./routes/auth.js";
 import dashboardRoutes from "./routes/dashboard.js";
@@ -47,6 +49,16 @@ app.use("/profile", profileRoutes);
 app.use("/sites", sitesRoutes);
 app.use("/attendance", attendanceRoutes);
 app.use("/notes", notesRoutes);
+
+app.use(
+  "/api-docs",
+  (req, res, next) => {
+    res.removeHeader("Content-Security-Policy");
+    next();
+  },
+  swaggerUi.serve,
+  swaggerUi.setup(swaggerSpec)
+);
 
 app.use(errorHandler);
 

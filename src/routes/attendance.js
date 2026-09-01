@@ -113,6 +113,73 @@ const clockValidators = [
     .toFloat(),
 ];
 
+/**
+ * @swagger
+ * /attendance/clockin:
+ *   post:
+ *     summary: Clock in at a site
+ *     tags: [Attendance]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [site_id, latitude, longitude]
+ *             properties:
+ *               site_id: { type: string, format: uuid }
+ *               latitude: { type: number, format: float, minimum: -90, maximum: 90 }
+ *               longitude: { type: number, format: float, minimum: -180, maximum: 180 }
+ *     responses:
+ *       201:
+ *         description: Clocked in successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 attendance: { $ref: '#/components/schemas/Attendance' }
+ *       400:
+ *         description: Validation error, or too far from the site
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             examples:
+ *               validation:
+ *                 value: { code: "VAL_001", message: "Validation error" }
+ *               outOfRange:
+ *                 value: { code: "ATT_001", message: "You are not within 100 metres of the site" }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Not assigned to this site
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Site not found
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "STE_001", message: "Site not found" }
+ *       409:
+ *         description: Already clocked in
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "ATT_002", message: "Already clocked in" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.post("/clockin", authenticate, requireRole("staff"), clockValidators, async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -190,6 +257,73 @@ router.post("/clockin", authenticate, requireRole("staff"), clockValidators, asy
   return res.status(201).json({ attendance });
 });
 
+/**
+ * @swagger
+ * /attendance/clockout:
+ *   post:
+ *     summary: Clock out of a site
+ *     tags: [Attendance]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [site_id, latitude, longitude]
+ *             properties:
+ *               site_id: { type: string, format: uuid }
+ *               latitude: { type: number, format: float, minimum: -90, maximum: 90 }
+ *               longitude: { type: number, format: float, minimum: -180, maximum: 180 }
+ *     responses:
+ *       200:
+ *         description: Clocked out successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 attendance: { $ref: '#/components/schemas/Attendance' }
+ *       400:
+ *         description: Validation error, too far from the site, or before/after photos incomplete
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             examples:
+ *               validation:
+ *                 value: { code: "VAL_001", message: "Validation error" }
+ *               outOfRange:
+ *                 value: { code: "ATT_001", message: "You are not within 100 metres of the site" }
+ *               photoPairRequired:
+ *                 value: { code: "ATT_004", message: "Before and after photos are required" }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not staff
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Not currently clocked in at this site, or site not found
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             examples:
+ *               notClockedIn:
+ *                 value: { code: "ATT_003", message: "Not clocked in" }
+ *               siteNotFound:
+ *                 value: { code: "STE_001", message: "Site not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.post("/clockout", authenticate, requireRole("staff"), clockValidators, async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -320,6 +454,67 @@ console.log("Insert errro ",insertError)
   return res.status(201).json({ photo });
 };
 
+/**
+ * @swagger
+ * /attendance/photos/before:
+ *   post:
+ *     summary: Upload a "before" photo for an open attendance record
+ *     tags: [Attendance]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required: [attendance_id, label, photo]
+ *             properties:
+ *               attendance_id: { type: string, format: uuid }
+ *               label: { type: string }
+ *               photo: { type: string, format: binary }
+ *     responses:
+ *       201:
+ *         description: Before photo uploaded
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 photo: { $ref: '#/components/schemas/AttendancePhoto' }
+ *       400:
+ *         description: Validation error, missing file, or attendance already clocked out
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             examples:
+ *               validation:
+ *                 value: { code: "VAL_001", message: "Validation error" }
+ *               alreadyClosed:
+ *                 value: { code: "ATT_008", message: "Attendance is already clocked out" }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not staff
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Attendance record not found or does not belong to the caller
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "ATT_005", message: "Attendance record not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.post(
   "/photos/before",
   authenticate,
@@ -329,6 +524,71 @@ router.post(
   handleBeforePhoto
 );
 
+/**
+ * @swagger
+ * /attendance/photos/{id}/after:
+ *   patch:
+ *     summary: Upload the "after" photo for a before/after pair
+ *     tags: [Attendance]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *         description: attendance_photos row id
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required: [after_photo]
+ *             properties:
+ *               after_photo: { type: string, format: binary }
+ *     responses:
+ *       200:
+ *         description: After photo uploaded
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 photo: { $ref: '#/components/schemas/AttendancePhoto' }
+ *       400:
+ *         description: Missing file, or an after photo already exists for this pair
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             examples:
+ *               validation:
+ *                 value: { code: "VAL_001", message: "Validation error" }
+ *               alreadyExists:
+ *                 value: { code: "ATT_007", message: "After photo already uploaded for this pair" }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not staff
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Photo row not found or does not belong to the caller
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "ATT_006", message: "Attendance photo not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.patch(
   "/photos/:id/after",
   authenticate,
@@ -402,6 +662,42 @@ router.patch(
   }
 );
 
+/**
+ * @swagger
+ * /attendance/my-history:
+ *   get:
+ *     summary: Get the current staff member's attendance history
+ *     tags: [Attendance]
+ *     responses:
+ *       200:
+ *         description: Attendance history with site details and photos, ordered by clock_in desc
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 attendance:
+ *                   type: array
+ *                   items: { $ref: '#/components/schemas/AttendanceWithDetails' }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not staff
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.get("/my-history", authenticate, requireRole("staff"), async (req, res) => {
   const { data: attendanceRows, error: attendanceError } = await supabase
     .from("attendance")
@@ -434,6 +730,47 @@ router.get("/my-history", authenticate, requireRole("staff"), async (req, res) =
   return res.status(200).json({ attendance });
 });
 
+/**
+ * @swagger
+ * /attendance/site/{site_id}:
+ *   get:
+ *     summary: Get all attendance records for a site
+ *     tags: [Attendance]
+ *     parameters:
+ *       - in: path
+ *         name: site_id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Attendance for the site with staff details and photos, ordered by clock_in desc
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 attendance:
+ *                   type: array
+ *                   items: { $ref: '#/components/schemas/AttendanceWithDetails' }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not an admin
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.get("/site/:site_id", authenticate, requireRole("admin"), async (req, res) => {
   const { data: attendanceRows, error: attendanceError } = await supabase
     .from("attendance")
@@ -466,6 +803,48 @@ router.get("/site/:site_id", authenticate, requireRole("admin"), async (req, res
   return res.status(200).json({ attendance });
 });
 
+/**
+ * @swagger
+ * /attendance/client-history:
+ *   get:
+ *     summary: Get attendance history across all of the current client's sites
+ *     tags: [Attendance]
+ *     responses:
+ *       200:
+ *         description: Attendance for the client's sites with staff details and photos, ordered by clock_in desc
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 attendance:
+ *                   type: array
+ *                   items: { $ref: '#/components/schemas/AttendanceWithDetails' }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not a client
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Client has no client_profile
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "USR_001", message: "User not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.get("/client-history", authenticate, requireRole("client"), async (req, res) => {
   const { data: clientProfile, error: clientProfileError } = await supabase
     .from("client_profile")

@@ -26,6 +26,71 @@ const inviteValidators = [
   body("phone").isString().trim().notEmpty().withMessage("Phone is required"),
 ];
 
+/**
+ * @swagger
+ * /admin/invite:
+ *   post:
+ *     summary: Invite a new staff or client user
+ *     tags: [Admin]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email, role, full_name, phone]
+ *             properties:
+ *               email: { type: string, format: email }
+ *               role: { type: string, enum: [staff, client] }
+ *               full_name: { type: string }
+ *               phone: { type: string }
+ *     responses:
+ *       201:
+ *         description: User invited successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 user:
+ *                   type: object
+ *                   properties:
+ *                     id: { type: string, format: uuid }
+ *                     email: { type: string, format: email }
+ *                     full_name: { type: string }
+ *                     phone: { type: string }
+ *                     role: { type: string, enum: [staff, client] }
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "VAL_001", message: "Validation error" }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not an admin
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       409:
+ *         description: User already exists
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "USR_002", message: "User already exists" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.post(
   "/invite",
   authenticate,
@@ -97,6 +162,42 @@ router.post(
   }
 );
 
+/**
+ * @swagger
+ * /admin/staff:
+ *   get:
+ *     summary: List all staff members
+ *     tags: [Admin]
+ *     responses:
+ *       200:
+ *         description: List of staff
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 staff:
+ *                   type: array
+ *                   items: { $ref: '#/components/schemas/StaffProfile' }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not an admin
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.get("/staff", authenticate, requireRole("admin"), async (req, res) => {
   const { data: profiles, error: profilesError } = await supabase
     .from("profiles")
@@ -134,6 +235,51 @@ router.get("/staff", authenticate, requireRole("admin"), async (req, res) => {
   return res.status(200).json({ staff });
 });
 
+/**
+ * @swagger
+ * /admin/staff/{id}:
+ *   get:
+ *     summary: Get a single staff member
+ *     tags: [Admin]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Staff member found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 staff: { $ref: '#/components/schemas/StaffProfile' }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not an admin
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Staff member not found
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "USR_001", message: "User not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.get("/staff/:id", authenticate, requireRole("admin"), async (req, res) => {
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
@@ -187,6 +333,69 @@ const staffUpdateValidators = [
     .withMessage("emergency_contact must be a non-empty string"),
 ];
 
+/**
+ * @swagger
+ * /admin/staff/{id}:
+ *   put:
+ *     summary: Update a staff member's profile and staff details
+ *     tags: [Admin]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               full_name: { type: string }
+ *               phone: { type: string }
+ *               avatar_url: { type: string }
+ *               employee_id: { type: string }
+ *               address: { type: string }
+ *               emergency_contact: { type: string }
+ *     responses:
+ *       200:
+ *         description: Staff member updated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 staff: { $ref: '#/components/schemas/StaffProfile' }
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "VAL_001", message: "Validation error" }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not an admin
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Staff member not found
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "USR_001", message: "User not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.put(
   "/staff/:id",
   authenticate,
@@ -243,6 +452,51 @@ router.put(
   }
 );
 
+/**
+ * @swagger
+ * /admin/staff/{id}:
+ *   delete:
+ *     summary: Soft delete (deactivate) a staff member
+ *     tags: [Admin]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Staff deactivated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message: { type: string, example: "Staff deactivated successfully" }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not an admin
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Staff member not found
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "USR_001", message: "User not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.delete("/staff/:id", authenticate, requireRole("admin"), async (req, res) => {
   const { data: existingProfile, error: fetchError } = await supabase
     .from("profiles")
@@ -271,6 +525,42 @@ router.delete("/staff/:id", authenticate, requireRole("admin"), async (req, res)
   return res.status(200).json({ message: "Staff deactivated successfully" });
 });
 
+/**
+ * @swagger
+ * /admin/clients:
+ *   get:
+ *     summary: List all clients
+ *     tags: [Admin]
+ *     responses:
+ *       200:
+ *         description: List of clients
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 clients:
+ *                   type: array
+ *                   items: { $ref: '#/components/schemas/ClientProfile' }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not an admin
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.get("/clients", authenticate, requireRole("admin"), async (req, res) => {
   const { data: profiles, error: profilesError } = await supabase
     .from("profiles")
@@ -308,6 +598,51 @@ router.get("/clients", authenticate, requireRole("admin"), async (req, res) => {
   return res.status(200).json({ clients });
 });
 
+/**
+ * @swagger
+ * /admin/clients/{id}:
+ *   get:
+ *     summary: Get a single client
+ *     tags: [Admin]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Client found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 client: { $ref: '#/components/schemas/ClientProfile' }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not an admin
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Client not found
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "USR_001", message: "User not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.get("/clients/:id", authenticate, requireRole("admin"), async (req, res) => {
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
@@ -366,6 +701,69 @@ const clientUpdateValidators = [
     .withMessage("contact_person must be a non-empty string"),
 ];
 
+/**
+ * @swagger
+ * /admin/clients/{id}:
+ *   put:
+ *     summary: Update a client's profile and client details
+ *     tags: [Admin]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               full_name: { type: string }
+ *               phone: { type: string }
+ *               avatar_url: { type: string }
+ *               company_name: { type: string }
+ *               billing_address: { type: string }
+ *               contact_person: { type: string }
+ *     responses:
+ *       200:
+ *         description: Client updated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 client: { $ref: '#/components/schemas/ClientProfile' }
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "VAL_001", message: "Validation error" }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not an admin
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Client not found
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "USR_001", message: "User not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.put(
   "/clients/:id",
   authenticate,
@@ -422,6 +820,51 @@ router.put(
   }
 );
 
+/**
+ * @swagger
+ * /admin/clients/{id}:
+ *   delete:
+ *     summary: Soft delete (deactivate) a client
+ *     tags: [Admin]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Client deactivated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message: { type: string, example: "Client deactivated successfully" }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not an admin
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Client not found
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "USR_001", message: "User not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
 router.delete("/clients/:id", authenticate, requireRole("admin"), async (req, res) => {
   const { data: existingProfile, error: fetchError } = await supabase
     .from("profiles")
