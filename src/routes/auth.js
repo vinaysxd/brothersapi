@@ -146,6 +146,15 @@ router.post("/set-password", setPasswordValidators, async (req, res) => {
     return res.status(500).json(ERRORS.SERVER_ERROR);
   }
 
+  const { error: profileError } = await supabase
+    .from("profiles")
+    .update({ is_active: true })
+    .eq("id", data.user.id);
+
+  if (profileError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
   return res.status(200).json({ message: "Password set successfully" });
 });
 

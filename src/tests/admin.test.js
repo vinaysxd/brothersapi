@@ -50,6 +50,7 @@ const chain = (result) => {
   builder.update = jest.fn(() => builder);
   builder.eq = jest.fn(() => builder);
   builder.in = jest.fn(() => builder);
+  builder.order = jest.fn(() => builder);
   builder.single = jest.fn(() => Promise.resolve(result));
   builder.maybeSingle = jest.fn(() => Promise.resolve(result));
   builder.then = (resolve) => resolve(result);
@@ -214,6 +215,14 @@ describe("POST /invite", () => {
     expect(supabase.from).toHaveBeenCalledWith("profiles");
     expect(supabase.from).toHaveBeenCalledWith("staff_profile");
     expect(supabase.from).not.toHaveBeenCalledWith("client_profile");
+    expect(insertMock).toHaveBeenCalledWith({
+      id: "new-staff-1",
+      email: validBody.email,
+      full_name: validBody.full_name,
+      phone: validBody.phone,
+      role: "staff",
+      is_active: false,
+    });
     expect(insertMock).toHaveBeenCalledWith({ profile_id: "new-staff-1" });
   });
 
@@ -257,6 +266,14 @@ describe("POST /invite", () => {
     expect(supabase.from).toHaveBeenCalledWith("profiles");
     expect(supabase.from).toHaveBeenCalledWith("client_profile");
     expect(supabase.from).not.toHaveBeenCalledWith("staff_profile");
+    expect(insertMock).toHaveBeenCalledWith({
+      id: "new-client-1",
+      email: validBody.email,
+      full_name: validBody.full_name,
+      phone: validBody.phone,
+      role: "client",
+      is_active: false,
+    });
     expect(insertMock).toHaveBeenCalledWith({ profile_id: "new-client-1" });
   });
 
@@ -371,6 +388,69 @@ describe("GET /staff", () => {
       ],
     });
   });
+
+  it("returns is_active from profiles even when staff_profile has a conflicting value", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(
+        chain({
+          data: [
+            { id: "staff-1", full_name: "Staff One", role: "staff", is_active: true },
+          ],
+          error: null,
+        })
+      )
+      .mockReturnValueOnce(
+        chain({
+          data: [{ profile_id: "staff-1", employee_id: "EMP-1", is_active: false }],
+          error: null,
+        })
+      );
+
+    const res = await request(app).get("/staff").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.staff[0].is_active).toBe(true);
+  });
+
+  it("keeps staff_profile.id (not profiles.id) as the id field", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(
+        chain({
+          data: [{ id: "profile-1", full_name: "Staff One", role: "staff", is_active: true }],
+          error: null,
+        })
+      )
+      .mockReturnValueOnce(
+        chain({
+          data: [{ id: "sp-1", profile_id: "profile-1", employee_id: "EMP-1" }],
+          error: null,
+        })
+      );
+
+    const res = await request(app).get("/staff").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.staff[0].id).toBe("sp-1");
+    expect(res.body.staff[0].is_active).toBe(true);
+  });
+
+  it("orders profiles by is_active descending (active users first)", async () => {
+    const headers = asUser(ADMIN_USER);
+    const profilesChain = chain({
+      data: [{ id: "staff-1", full_name: "Staff One", role: "staff" }],
+      error: null,
+    });
+    supabase.from
+      .mockReturnValueOnce(profilesChain)
+      .mockReturnValueOnce(chain({ data: [], error: null }));
+
+    const res = await request(app).get("/staff").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(profilesChain.order).toHaveBeenCalledWith("is_active", { ascending: false });
+  });
 });
 
 describe("GET /staff/:id", () => {
@@ -451,6 +531,51 @@ describe("GET /staff/:id", () => {
         employee_id: "EMP-1",
       },
     });
+  });
+
+  it("returns is_active from profiles even when staff_profile has a conflicting value", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(
+        chain({
+          data: { id: "staff-1", full_name: "Staff One", role: "staff", is_active: true },
+          error: null,
+        })
+      )
+      .mockReturnValueOnce(
+        chain({
+          data: { profile_id: "staff-1", employee_id: "EMP-1", is_active: false },
+          error: null,
+        })
+      );
+
+    const res = await request(app).get("/staff/staff-1").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.staff.is_active).toBe(true);
+  });
+
+  it("keeps staff_profile.id (not profiles.id) as the id field", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(
+        chain({
+          data: { id: "profile-1", full_name: "Staff One", role: "staff", is_active: true },
+          error: null,
+        })
+      )
+      .mockReturnValueOnce(
+        chain({
+          data: { id: "sp-1", profile_id: "profile-1", employee_id: "EMP-1" },
+          error: null,
+        })
+      );
+
+    const res = await request(app).get("/staff/profile-1").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.staff.id).toBe("sp-1");
+    expect(res.body.staff.is_active).toBe(true);
   });
 });
 
@@ -556,7 +681,12 @@ describe("PUT /staff/:id", () => {
       error: null,
     });
     const staffUpdateChain = chain({
-      data: { profile_id: "staff-1", employee_id: "EMP-2", address: "2 New St" },
+      data: {
+        profile_id: "staff-1",
+        employee_id: "EMP-1",
+        address: "2 New St",
+        emergency_contact: "555-0100",
+      },
       error: null,
     });
     supabase.from
@@ -570,8 +700,8 @@ describe("PUT /staff/:id", () => {
       .send({
         full_name: "New Name",
         phone: "1112223333",
-        employee_id: "EMP-2",
         address: "2 New St",
+        emergency_contact: "555-0100",
       });
 
     expect(res.statusCode).toBe(200);
@@ -582,8 +712,9 @@ describe("PUT /staff/:id", () => {
         phone: "1112223333",
         role: "staff",
         profile_id: "staff-1",
-        employee_id: "EMP-2",
+        employee_id: "EMP-1",
         address: "2 New St",
+        emergency_contact: "555-0100",
       },
     });
     expect(profileUpdateChain.update).toHaveBeenCalledWith({
@@ -591,9 +722,38 @@ describe("PUT /staff/:id", () => {
       phone: "1112223333",
     });
     expect(staffUpdateChain.update).toHaveBeenCalledWith({
-      employee_id: "EMP-2",
       address: "2 New St",
+      emergency_contact: "555-0100",
     });
+  });
+
+  it("ignores employee_id even when included in the request body", async () => {
+    const headers = asUser(ADMIN_USER);
+    const profileUpdateChain = chain({
+      data: { id: "staff-1", full_name: "New Name", role: "staff" },
+      error: null,
+    });
+    const staffUpdateChain = chain({
+      data: { profile_id: "staff-1", employee_id: "EMP-1" },
+      error: null,
+    });
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "staff-1", role: "staff" }, error: null }))
+      .mockReturnValueOnce(profileUpdateChain)
+      .mockReturnValueOnce(staffUpdateChain);
+
+    const res = await request(app)
+      .put("/staff/staff-1")
+      .set(headers)
+      .send({ full_name: "New Name", employee_id: "HACKED-ID" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.staff.employee_id).toBe("EMP-1");
+    expect(profileUpdateChain.update).toHaveBeenCalledWith({ full_name: "New Name" });
+    expect(staffUpdateChain.update).toHaveBeenCalledWith({});
+    expect(staffUpdateChain.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ employee_id: expect.anything() })
+    );
   });
 });
 
@@ -665,6 +825,77 @@ describe("DELETE /staff/:id", () => {
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual({ message: "Staff deactivated successfully" });
     expect(updateChain.update).toHaveBeenCalledWith({ is_active: false });
+  });
+});
+
+describe("PATCH /staff/:id/reactivate", () => {
+  let app;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    app = buildApp();
+  });
+
+  it("blocks requests with no token", async () => {
+    const res = await request(app).patch("/staff/staff-1/reactivate");
+
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual(ERRORS.AUTH_NO_TOKEN);
+  });
+
+  it("blocks a non-admin authenticated user", async () => {
+    const headers = asUser(STAFF_USER);
+
+    const res = await request(app).patch("/staff/staff-1/reactivate").set(headers);
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual(ERRORS.AUTH_UNAUTHORIZED);
+  });
+
+  it("returns 500 when fetching the staff member fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).patch("/staff/staff-1/reactivate").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns 404 when the staff member does not exist", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: null }));
+
+    const res = await request(app).patch("/staff/staff-1/reactivate").set(headers);
+
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toEqual(ERRORS.USER_NOT_FOUND);
+  });
+
+  it("returns 500 when reactivating fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "staff-1" }, error: null }))
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).patch("/staff/staff-1/reactivate").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("reactivates the staff member successfully", async () => {
+    const headers = asUser(ADMIN_USER);
+    const updateChain = chain({ data: null, error: null });
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "staff-1" }, error: null }))
+      .mockReturnValueOnce(updateChain);
+
+    const res = await request(app).patch("/staff/staff-1/reactivate").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ message: "Staff reactivated successfully" });
+    expect(updateChain.update).toHaveBeenCalledWith({ is_active: true });
   });
 });
 
@@ -756,6 +987,69 @@ describe("GET /clients", () => {
       ],
     });
   });
+
+  it("returns is_active from profiles even when client_profile has a conflicting value", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(
+        chain({
+          data: [
+            { id: "client-1", full_name: "Client One", role: "client", is_active: true },
+          ],
+          error: null,
+        })
+      )
+      .mockReturnValueOnce(
+        chain({
+          data: [{ profile_id: "client-1", company_name: "Acme Co", is_active: false }],
+          error: null,
+        })
+      );
+
+    const res = await request(app).get("/clients").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.clients[0].is_active).toBe(true);
+  });
+
+  it("keeps client_profile.id (not profiles.id) as the id field", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(
+        chain({
+          data: [{ id: "profile-1", full_name: "Client One", role: "client", is_active: true }],
+          error: null,
+        })
+      )
+      .mockReturnValueOnce(
+        chain({
+          data: [{ id: "cp-1", profile_id: "profile-1", company_name: "Acme Co" }],
+          error: null,
+        })
+      );
+
+    const res = await request(app).get("/clients").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.clients[0].id).toBe("cp-1");
+    expect(res.body.clients[0].is_active).toBe(true);
+  });
+
+  it("orders profiles by is_active descending (active users first)", async () => {
+    const headers = asUser(ADMIN_USER);
+    const profilesChain = chain({
+      data: [{ id: "client-1", full_name: "Client One", role: "client" }],
+      error: null,
+    });
+    supabase.from
+      .mockReturnValueOnce(profilesChain)
+      .mockReturnValueOnce(chain({ data: [], error: null }));
+
+    const res = await request(app).get("/clients").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(profilesChain.order).toHaveBeenCalledWith("is_active", { ascending: false });
+  });
 });
 
 describe("GET /clients/:id", () => {
@@ -836,6 +1130,51 @@ describe("GET /clients/:id", () => {
         company_name: "Acme Co",
       },
     });
+  });
+
+  it("returns is_active from profiles even when client_profile has a conflicting value", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(
+        chain({
+          data: { id: "client-1", full_name: "Client One", role: "client", is_active: true },
+          error: null,
+        })
+      )
+      .mockReturnValueOnce(
+        chain({
+          data: { profile_id: "client-1", company_name: "Acme Co", is_active: false },
+          error: null,
+        })
+      );
+
+    const res = await request(app).get("/clients/client-1").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.client.is_active).toBe(true);
+  });
+
+  it("keeps client_profile.id (not profiles.id) as the id field", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(
+        chain({
+          data: { id: "profile-1", full_name: "Client One", role: "client", is_active: true },
+          error: null,
+        })
+      )
+      .mockReturnValueOnce(
+        chain({
+          data: { id: "cp-1", profile_id: "profile-1", company_name: "Acme Co" },
+          error: null,
+        })
+      );
+
+    const res = await request(app).get("/clients/profile-1").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.client.id).toBe("cp-1");
+    expect(res.body.client.is_active).toBe(true);
   });
 });
 
@@ -1048,5 +1387,76 @@ describe("DELETE /clients/:id", () => {
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual({ message: "Client deactivated successfully" });
     expect(updateChain.update).toHaveBeenCalledWith({ is_active: false });
+  });
+});
+
+describe("PATCH /clients/:id/reactivate", () => {
+  let app;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    app = buildApp();
+  });
+
+  it("blocks requests with no token", async () => {
+    const res = await request(app).patch("/clients/client-1/reactivate");
+
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual(ERRORS.AUTH_NO_TOKEN);
+  });
+
+  it("blocks a non-admin authenticated user", async () => {
+    const headers = asUser(STAFF_USER);
+
+    const res = await request(app).patch("/clients/client-1/reactivate").set(headers);
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual(ERRORS.AUTH_UNAUTHORIZED);
+  });
+
+  it("returns 500 when fetching the client fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).patch("/clients/client-1/reactivate").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns 404 when the client does not exist", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: null }));
+
+    const res = await request(app).patch("/clients/client-1/reactivate").set(headers);
+
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toEqual(ERRORS.USER_NOT_FOUND);
+  });
+
+  it("returns 500 when reactivating fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "client-1" }, error: null }))
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).patch("/clients/client-1/reactivate").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("reactivates the client successfully", async () => {
+    const headers = asUser(ADMIN_USER);
+    const updateChain = chain({ data: null, error: null });
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "client-1" }, error: null }))
+      .mockReturnValueOnce(updateChain);
+
+    const res = await request(app).patch("/clients/client-1/reactivate").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ message: "Client reactivated successfully" });
+    expect(updateChain.update).toHaveBeenCalledWith({ is_active: true });
   });
 });

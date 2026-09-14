@@ -17,8 +17,16 @@ const pick = (source, fields) => {
   return result;
 };
 
-const findClient = async (clientId) =>
-  supabase.from("client_profile").select("id").eq("id", clientId).maybeSingle();
+const findClient = async (clientId) => {
+  console.log("[findClient] querying client_profile where profile_id =", clientId);
+  const result = await supabase
+    .from("client_profile")
+    .select("id")
+    .eq("profile_id", clientId)
+    .maybeSingle();
+  console.log("[findClient] result:", result.data, "error:", result.error);
+  return result;
+};
 
 const findSiteClientDetails = async (clientId) => {
   const { data: clientProfile, error: clientProfileError } = await supabase
@@ -110,7 +118,7 @@ const assignStaffValidators = [
  *               address: { type: string }
  *               latitude: { type: number, format: float, minimum: -90, maximum: 90 }
  *               longitude: { type: number, format: float, minimum: -180, maximum: 180 }
- *               client_id: { type: string, format: uuid, description: "client_profile.id" }
+ *               client_id: { type: string, format: uuid, description: "profiles.id of the client" }
  *     responses:
  *       201:
  *         description: Site created
@@ -159,10 +167,12 @@ router.post("/", authenticate, requireRole("admin"), siteValidators, async (req,
 
   const { name, address, latitude, longitude, client_id } = req.body;
 
+  console.log("[POST /sites] client_id received:", client_id);
+  console.log("[POST /sites] req.user.id (created_by):", req.user.id);
+
   const { data: client, error: clientError } = await findClient(client_id);
 
   if (clientError) {
-    
     return res.status(500).json(ERRORS.SERVER_ERROR);
   }
 
@@ -172,7 +182,7 @@ router.post("/", authenticate, requireRole("admin"), siteValidators, async (req,
 
   const { data: site, error: insertError } = await supabase
     .from("sites")
-    .insert({ name, address, latitude, longitude, client_id, created_by: req.user.id })
+    .insert({ name, address, latitude, longitude, client_id: client.id, created_by: req.user.id })
     .select()
     .single();
 
@@ -639,6 +649,95 @@ router.get("/:id", authenticate, requireRole("admin"), async (req, res) => {
 
 /**
  * @swagger
+ * /sites/{id}/staff:
+ *   get:
+ *     summary: List staff assigned to a site
+ *     tags: [Sites]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Assigned staff profiles
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 staff:
+ *                   type: array
+ *                   items: { $ref: '#/components/schemas/Profile' }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not an admin
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Site not found
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "STE_001", message: "Site not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
+router.get("/:id/staff", authenticate, requireRole("admin"), async (req, res) => {
+  const { data: site, error: siteError } = await supabase
+    .from("sites")
+    .select("id")
+    .eq("id", req.params.id)
+    .maybeSingle();
+
+  if (siteError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  if (!site) {
+    return res.status(404).json(ERRORS.SITE_NOT_FOUND);
+  }
+
+  const { data: assignments, error: assignmentsError } = await supabase
+    .from("site_staff")
+    .select("profile_id")
+    .eq("site_id", req.params.id);
+
+  if (assignmentsError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  const profileIds = assignments.map((assignment) => assignment.profile_id);
+
+  if (profileIds.length === 0) {
+    return res.status(200).json({ staff: [] });
+  }
+
+  const { data: profiles, error: profilesError } = await supabase
+    .from("profiles")
+    .select("*")
+    .in("id", profileIds);
+
+  if (profilesError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  return res.status(200).json({ staff: profiles });
+});
+
+/**
+ * @swagger
  * /sites/{id}:
  *   put:
  *     summary: Update a site
@@ -658,7 +757,7 @@ router.get("/:id", authenticate, requireRole("admin"), async (req, res) => {
  *               address: { type: string }
  *               latitude: { type: number, format: float, minimum: -90, maximum: 90 }
  *               longitude: { type: number, format: float, minimum: -180, maximum: 180 }
- *               client_id: { type: string, format: uuid, description: "client_profile.id" }
+ *               client_id: { type: string, format: uuid, description: "profiles.id of the client" }
  *     responses:
  *       200:
  *         description: Site updated
@@ -723,6 +822,8 @@ router.put("/:id", authenticate, requireRole("admin"), siteUpdateValidators, asy
     return res.status(404).json(ERRORS.SITE_NOT_FOUND);
   }
 
+  const updateFields = pick(req.body, ["name", "address", "latitude", "longitude", "client_id"]);
+
   if (req.body.client_id !== undefined) {
     const { data: client, error: clientError } = await findClient(req.body.client_id);
 
@@ -733,9 +834,9 @@ router.put("/:id", authenticate, requireRole("admin"), siteUpdateValidators, asy
     if (!client) {
       return res.status(404).json(ERRORS.USER_NOT_FOUND);
     }
-  }
 
-  const updateFields = pick(req.body, ["name", "address", "latitude", "longitude", "client_id"]);
+    updateFields.client_id = client.id;
+  }
 
   const { data: updatedSite, error: updateError } = await supabase
     .from("sites")
@@ -822,6 +923,150 @@ router.delete("/:id", authenticate, requireRole("admin"), async (req, res) => {
 
 /**
  * @swagger
+ * /sites/{id}/deactivate:
+ *   patch:
+ *     summary: Deactivate a site
+ *     tags: [Sites]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Site deactivated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message: { type: string, example: "Site deactivated successfully" }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not an admin
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Site not found
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "STE_001", message: "Site not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
+router.patch("/:id/deactivate", authenticate, requireRole("admin"), async (req, res) => {
+  const { data: existingSite, error: fetchError } = await supabase
+    .from("sites")
+    .select("id")
+    .eq("id", req.params.id)
+    .maybeSingle();
+
+  if (fetchError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  if (!existingSite) {
+    return res.status(404).json(ERRORS.SITE_NOT_FOUND);
+  }
+
+  const { error: updateError } = await supabase
+    .from("sites")
+    .update({ is_active: false })
+    .eq("id", req.params.id);
+
+  if (updateError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  return res.status(200).json({ message: "Site deactivated successfully" });
+});
+
+/**
+ * @swagger
+ * /sites/{id}/reactivate:
+ *   patch:
+ *     summary: Reactivate a site
+ *     tags: [Sites]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Site reactivated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message: { type: string, example: "Site reactivated successfully" }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not an admin
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Site not found
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "STE_001", message: "Site not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
+router.patch("/:id/reactivate", authenticate, requireRole("admin"), async (req, res) => {
+  const { data: existingSite, error: fetchError } = await supabase
+    .from("sites")
+    .select("id")
+    .eq("id", req.params.id)
+    .maybeSingle();
+
+  if (fetchError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  if (!existingSite) {
+    return res.status(404).json(ERRORS.SITE_NOT_FOUND);
+  }
+
+  const { error: updateError } = await supabase
+    .from("sites")
+    .update({ is_active: true })
+    .eq("id", req.params.id);
+
+  if (updateError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  return res.status(200).json({ message: "Site reactivated successfully" });
+});
+
+/**
+ * @swagger
  * /sites/{id}/assign-staff:
  *   post:
  *     summary: Assign a staff member to a site
@@ -903,6 +1148,8 @@ router.post(
 
     const { profile_id } = req.body;
 
+    console.log("[POST /sites/:id/assign-staff] profile_id received:", profile_id);
+
     const { data: site, error: siteError } = await supabase
       .from("sites")
       .select("id")
@@ -917,12 +1164,25 @@ router.post(
       return res.status(404).json(ERRORS.SITE_NOT_FOUND);
     }
 
+    console.log(
+      "[POST /sites/:id/assign-staff] querying profiles where id =",
+      profile_id,
+      "and role = 'staff'"
+    );
+
     const { data: staffProfile, error: staffError } = await supabase
       .from("profiles")
       .select("id")
       .eq("id", profile_id)
       .eq("role", "staff")
       .maybeSingle();
+
+    console.log(
+      "[POST /sites/:id/assign-staff] staff lookup result:",
+      staffProfile,
+      "error:",
+      staffError
+    );
 
     if (staffError) {
       return res.status(500).json(ERRORS.SERVER_ERROR);

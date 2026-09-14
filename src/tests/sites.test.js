@@ -48,7 +48,7 @@ const validSiteBody = {
   address: "123 Main St",
   latitude: 40.7128,
   longitude: -74.006,
-  client_id: "client-1",
+  client_id: "profile-1",
 };
 
 let app;
@@ -134,7 +134,7 @@ describe("POST /sites", () => {
   it("returns 500 when inserting the site fails", async () => {
     const headers = asUser(ADMIN_USER);
     supabase.from
-      .mockReturnValueOnce(chain({ data: { id: "client-1" }, error: null }))
+      .mockReturnValueOnce(chain({ data: { id: "cp-1" }, error: null }))
       .mockReturnValueOnce(chain({ data: null, error: { message: "insert failed" } }));
 
     const res = await request(app).post("/").set(headers).send(validSiteBody);
@@ -143,11 +143,11 @@ describe("POST /sites", () => {
     expect(res.body).toEqual(ERRORS.SERVER_ERROR);
   });
 
-  it("creates a site with created_by set to the admin's id", async () => {
+  it("creates a site with created_by set to the admin's id, storing client_profile.id", async () => {
     const headers = asUser(ADMIN_USER);
-    const clientChain = chain({ data: { id: "client-1" }, error: null });
+    const clientChain = chain({ data: { id: "cp-1" }, error: null });
     const insertChain = chain({
-      data: { id: "site-1", ...validSiteBody, created_by: "admin-1" },
+      data: { id: "site-1", ...validSiteBody, client_id: "cp-1", created_by: "admin-1" },
       error: null,
     });
     supabase.from.mockReturnValueOnce(clientChain).mockReturnValueOnce(insertChain);
@@ -155,11 +155,17 @@ describe("POST /sites", () => {
     const res = await request(app).post("/").set(headers).send(validSiteBody);
 
     expect(res.statusCode).toBe(201);
-    expect(res.body.site).toEqual({ id: "site-1", ...validSiteBody, created_by: "admin-1" });
+    expect(res.body.site).toEqual({
+      id: "site-1",
+      ...validSiteBody,
+      client_id: "cp-1",
+      created_by: "admin-1",
+    });
     expect(supabase.from).toHaveBeenNthCalledWith(1, "client_profile");
-    expect(clientChain.eq).toHaveBeenCalledWith("id", "client-1");
+    expect(clientChain.eq).toHaveBeenCalledWith("profile_id", "profile-1");
     expect(insertChain.insert).toHaveBeenCalledWith({
       ...validSiteBody,
+      client_id: "cp-1",
       created_by: "admin-1",
     });
   });
@@ -723,6 +729,113 @@ describe("GET /sites/:id", () => {
   });
 });
 
+describe("GET /sites/:id/staff", () => {
+  it("blocks requests with no token", async () => {
+    const res = await request(app).get("/site-1/staff");
+
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual(ERRORS.AUTH_NO_TOKEN);
+  });
+
+  it("blocks a non-admin authenticated user", async () => {
+    const headers = asUser(STAFF_USER);
+
+    const res = await request(app).get("/site-1/staff").set(headers);
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual(ERRORS.AUTH_UNAUTHORIZED);
+  });
+
+  it("returns 500 when fetching the site fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).get("/site-1/staff").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns 404 when the site does not exist", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: null }));
+
+    const res = await request(app).get("/site-1/staff").set(headers);
+
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toEqual(ERRORS.SITE_NOT_FOUND);
+  });
+
+  it("returns 500 when fetching assignments fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "site-1" }, error: null }))
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).get("/site-1/staff").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns an empty list without querying profiles when there are no assignments", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "site-1" }, error: null }))
+      .mockReturnValueOnce(chain({ data: [], error: null }));
+
+    const res = await request(app).get("/site-1/staff").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ staff: [] });
+    expect(supabase.from).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns 500 when fetching profiles fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "site-1" }, error: null }))
+      .mockReturnValueOnce(chain({ data: [{ profile_id: "staff-2" }], error: null }))
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).get("/site-1/staff").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns the assigned staff profiles", async () => {
+    const headers = asUser(ADMIN_USER);
+    const assignmentsChain = chain({
+      data: [{ profile_id: "staff-2" }, { profile_id: "staff-3" }],
+      error: null,
+    });
+    const profilesChain = chain({
+      data: [
+        { id: "staff-2", full_name: "Staff Two", phone: "111", is_active: true },
+        { id: "staff-3", full_name: "Staff Three", phone: "222", is_active: false },
+      ],
+      error: null,
+    });
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "site-1" }, error: null }))
+      .mockReturnValueOnce(assignmentsChain)
+      .mockReturnValueOnce(profilesChain);
+
+    const res = await request(app).get("/site-1/staff").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      staff: [
+        { id: "staff-2", full_name: "Staff Two", phone: "111", is_active: true },
+        { id: "staff-3", full_name: "Staff Three", phone: "222", is_active: false },
+      ],
+    });
+    expect(assignmentsChain.eq).toHaveBeenCalledWith("site_id", "site-1");
+    expect(profilesChain.in).toHaveBeenCalledWith("id", ["staff-2", "staff-3"]);
+  });
+});
+
 describe("PUT /sites/:id", () => {
   it("blocks requests with no token", async () => {
     const res = await request(app).put("/site-1").send({ name: "New Name" });
@@ -775,7 +888,7 @@ describe("PUT /sites/:id", () => {
       .mockReturnValueOnce(chain({ data: { id: "site-1" }, error: null }))
       .mockReturnValueOnce(chain({ data: null, error: null }));
 
-    const res = await request(app).put("/site-1").set(headers).send({ client_id: "client-2" });
+    const res = await request(app).put("/site-1").set(headers).send({ client_id: "profile-2" });
 
     expect(res.statusCode).toBe(404);
     expect(res.body).toEqual(ERRORS.USER_NOT_FOUND);
@@ -808,11 +921,11 @@ describe("PUT /sites/:id", () => {
     expect(updateChain.update).toHaveBeenCalledWith({ name: "New Name" });
   });
 
-  it("updates the site including a validated client_id", async () => {
+  it("updates the site including a validated client_id, storing client_profile.id", async () => {
     const headers = asUser(ADMIN_USER);
-    const clientChain = chain({ data: { id: "client-2" }, error: null });
+    const clientChain = chain({ data: { id: "cp-2" }, error: null });
     const updateChain = chain({
-      data: { id: "site-1", name: "Old Name", client_id: "client-2" },
+      data: { id: "site-1", name: "Old Name", client_id: "cp-2" },
       error: null,
     });
     supabase.from
@@ -820,11 +933,11 @@ describe("PUT /sites/:id", () => {
       .mockReturnValueOnce(clientChain)
       .mockReturnValueOnce(updateChain);
 
-    const res = await request(app).put("/site-1").set(headers).send({ client_id: "client-2" });
+    const res = await request(app).put("/site-1").set(headers).send({ client_id: "profile-2" });
 
     expect(res.statusCode).toBe(200);
-    expect(clientChain.eq).toHaveBeenCalledWith("id", "client-2");
-    expect(updateChain.update).toHaveBeenCalledWith({ client_id: "client-2" });
+    expect(clientChain.eq).toHaveBeenCalledWith("profile_id", "profile-2");
+    expect(updateChain.update).toHaveBeenCalledWith({ client_id: "cp-2" });
   });
 });
 
@@ -887,6 +1000,134 @@ describe("DELETE /sites/:id", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual({ message: "Site deleted successfully" });
+  });
+});
+
+describe("PATCH /sites/:id/deactivate", () => {
+  it("blocks requests with no token", async () => {
+    const res = await request(app).patch("/site-1/deactivate");
+
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual(ERRORS.AUTH_NO_TOKEN);
+  });
+
+  it("blocks a non-admin authenticated user", async () => {
+    const headers = asUser(STAFF_USER);
+
+    const res = await request(app).patch("/site-1/deactivate").set(headers);
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual(ERRORS.AUTH_UNAUTHORIZED);
+  });
+
+  it("returns 500 when fetching the site fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).patch("/site-1/deactivate").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns 404 when the site does not exist", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: null }));
+
+    const res = await request(app).patch("/site-1/deactivate").set(headers);
+
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toEqual(ERRORS.SITE_NOT_FOUND);
+  });
+
+  it("returns 500 when the update fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "site-1" }, error: null }))
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).patch("/site-1/deactivate").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("deactivates the site successfully", async () => {
+    const headers = asUser(ADMIN_USER);
+    const updateChain = chain({ data: null, error: null });
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "site-1" }, error: null }))
+      .mockReturnValueOnce(updateChain);
+
+    const res = await request(app).patch("/site-1/deactivate").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ message: "Site deactivated successfully" });
+    expect(updateChain.update).toHaveBeenCalledWith({ is_active: false });
+  });
+});
+
+describe("PATCH /sites/:id/reactivate", () => {
+  it("blocks requests with no token", async () => {
+    const res = await request(app).patch("/site-1/reactivate");
+
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual(ERRORS.AUTH_NO_TOKEN);
+  });
+
+  it("blocks a non-admin authenticated user", async () => {
+    const headers = asUser(STAFF_USER);
+
+    const res = await request(app).patch("/site-1/reactivate").set(headers);
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual(ERRORS.AUTH_UNAUTHORIZED);
+  });
+
+  it("returns 500 when fetching the site fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).patch("/site-1/reactivate").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns 404 when the site does not exist", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: null }));
+
+    const res = await request(app).patch("/site-1/reactivate").set(headers);
+
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toEqual(ERRORS.SITE_NOT_FOUND);
+  });
+
+  it("returns 500 when the update fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "site-1" }, error: null }))
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).patch("/site-1/reactivate").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("reactivates the site successfully", async () => {
+    const headers = asUser(ADMIN_USER);
+    const updateChain = chain({ data: null, error: null });
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "site-1" }, error: null }))
+      .mockReturnValueOnce(updateChain);
+
+    const res = await request(app).patch("/site-1/reactivate").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ message: "Site reactivated successfully" });
+    expect(updateChain.update).toHaveBeenCalledWith({ is_active: true });
   });
 });
 

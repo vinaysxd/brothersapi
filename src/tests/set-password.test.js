@@ -12,6 +12,7 @@ jest.mock("../config/supabase.js", () => ({
         updateUserById: jest.fn(),
       },
     },
+    from: jest.fn(),
   },
 }));
 
@@ -27,12 +28,20 @@ const validBody = {
   password: "new-password-123",
 };
 
+const mockProfileUpdate = (error = null) => {
+  const eqMock = jest.fn().mockResolvedValue({ error });
+  const updateMock = jest.fn().mockReturnValue({ eq: eqMock });
+  supabase.from.mockReturnValue({ update: updateMock });
+  return { updateMock, eqMock };
+};
+
 describe("POST /set-password", () => {
   let app;
 
   beforeEach(() => {
     jest.clearAllMocks();
     app = buildApp();
+    mockProfileUpdate();
   });
 
   describe("validation", () => {
@@ -110,7 +119,7 @@ describe("POST /set-password", () => {
     });
   });
 
-  it("returns 200 on success", async () => {
+  it("returns 500 when activating the profile fails", async () => {
     supabase.auth.getUser.mockResolvedValue({
       data: { user: { id: "user-1" } },
       error: null,
@@ -119,10 +128,33 @@ describe("POST /set-password", () => {
       data: { user: { id: "user-1" } },
       error: null,
     });
+    const { eqMock } = mockProfileUpdate({ message: "update failed" });
+
+    const res = await request(app).post("/set-password").send(validBody);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+    expect(supabase.from).toHaveBeenCalledWith("profiles");
+    expect(eqMock).toHaveBeenCalledWith("id", "user-1");
+  });
+
+  it("returns 200 on success and activates the profile", async () => {
+    supabase.auth.getUser.mockResolvedValue({
+      data: { user: { id: "user-1" } },
+      error: null,
+    });
+    supabase.auth.admin.updateUserById.mockResolvedValue({
+      data: { user: { id: "user-1" } },
+      error: null,
+    });
+    const { updateMock, eqMock } = mockProfileUpdate();
 
     const res = await request(app).post("/set-password").send(validBody);
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual({ message: "Password set successfully" });
+    expect(supabase.from).toHaveBeenCalledWith("profiles");
+    expect(updateMock).toHaveBeenCalledWith({ is_active: true });
+    expect(eqMock).toHaveBeenCalledWith("id", "user-1");
   });
 });

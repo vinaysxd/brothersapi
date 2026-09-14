@@ -10,6 +10,9 @@ jest.mock("../config/supabase.js", () => ({
       getUser: jest.fn(),
     },
     from: jest.fn(),
+    storage: {
+      from: jest.fn(),
+    },
   },
 }));
 
@@ -37,6 +40,14 @@ const chain = (result) => {
   builder.single = jest.fn(() => Promise.resolve(result));
   return builder;
 };
+
+const storageChain = (uploadResult) => ({
+  upload: jest.fn().mockResolvedValue(uploadResult),
+});
+
+const signedUrlStorageChain = (signedUrlResult) => ({
+  createSignedUrl: jest.fn().mockResolvedValue(signedUrlResult),
+});
 
 describe("GET /profile/me", () => {
   let app;
@@ -85,8 +96,14 @@ describe("GET /profile/me", () => {
     const res = await request(app).get("/me").set(headers);
 
     expect(res.statusCode).toBe(200);
-    expect(res.body).toEqual({ id: "admin-1", full_name: "Admin One", role: "admin" });
+    expect(res.body).toEqual({
+      id: "admin-1",
+      full_name: "Admin One",
+      role: "admin",
+      signed_avatar_url: null,
+    });
     expect(supabase.from).toHaveBeenCalledTimes(1);
+    expect(supabase.storage.from).not.toHaveBeenCalled();
   });
 
   it("returns the combined profile for a staff user", async () => {
@@ -115,6 +132,7 @@ describe("GET /profile/me", () => {
       profile_id: "staff-1",
       address: "1 Main St",
       emergency_contact: "555-0100",
+      signed_avatar_url: null,
     });
     expect(supabase.from).toHaveBeenCalledWith("profiles");
     expect(supabase.from).toHaveBeenCalledWith("staff_profile");
@@ -145,6 +163,7 @@ describe("GET /profile/me", () => {
       role: "client",
       profile_id: "client-1",
       company_name: "Acme Co",
+      signed_avatar_url: null,
     });
     expect(supabase.from).toHaveBeenCalledWith("profiles");
     expect(supabase.from).toHaveBeenCalledWith("client_profile");
@@ -167,6 +186,55 @@ describe("GET /profile/me", () => {
     supabase.from
       .mockReturnValueOnce(chain({ data: { id: "client-1", role: "client" }, error: null }))
       .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).get("/me").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns a signed_avatar_url when avatar_url is set", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(
+      chain({
+        data: { id: "admin-1", full_name: "Admin One", role: "admin", avatar_url: "avatars/admin-1/photo.jpg" },
+        error: null,
+      })
+    );
+    const signedUrlChain = signedUrlStorageChain({
+      data: { signedUrl: "https://storage.example.com/signed/photo.jpg" },
+      error: null,
+    });
+    supabase.storage.from.mockReturnValue(signedUrlChain);
+
+    const res = await request(app).get("/me").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      id: "admin-1",
+      full_name: "Admin One",
+      role: "admin",
+      avatar_url: "avatars/admin-1/photo.jpg",
+      signed_avatar_url: "https://storage.example.com/signed/photo.jpg",
+    });
+    expect(supabase.storage.from).toHaveBeenCalledWith("bg-photos");
+    expect(signedUrlChain.createSignedUrl).toHaveBeenCalledWith(
+      "avatars/admin-1/photo.jpg",
+      3600
+    );
+  });
+
+  it("returns 500 when generating the signed avatar url fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(
+      chain({
+        data: { id: "admin-1", full_name: "Admin One", role: "admin", avatar_url: "avatars/admin-1/photo.jpg" },
+        error: null,
+      })
+    );
+    supabase.storage.from.mockReturnValue(
+      signedUrlStorageChain({ data: null, error: { message: "fail" } })
+    );
 
     const res = await request(app).get("/me").set(headers);
 
@@ -348,5 +416,67 @@ describe("PUT /profile/me", () => {
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual({ id: "admin-1", full_name: "New Admin Name", role: "admin" });
     expect(supabase.from).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("POST /profile/avatar", () => {
+  let app;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    app = buildApp();
+  });
+
+  it("blocks requests with no token", async () => {
+    const res = await request(app)
+      .post("/avatar")
+      .attach("avatar", Buffer.from("fake-image"), "avatar.jpg");
+
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual(ERRORS.AUTH_NO_TOKEN);
+  });
+
+  it("rejects a missing file", async () => {
+    const headers = asUser(STAFF_USER);
+
+    const res = await request(app).post("/avatar").set(headers);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual(ERRORS.VALIDATION_ERROR);
+  });
+
+  it("returns 500 when the upload fails", async () => {
+    const headers = asUser(STAFF_USER);
+    supabase.storage.from.mockReturnValue(
+      storageChain({ error: { message: "upload failed" } })
+    );
+
+    const res = await request(app)
+      .post("/avatar")
+      .set(headers)
+      .attach("avatar", Buffer.from("fake-image"), "avatar.jpg");
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("uploads the avatar and returns the storage path", async () => {
+    const headers = asUser(STAFF_USER);
+    const storageFromResult = storageChain({ error: null });
+    supabase.storage.from.mockReturnValue(storageFromResult);
+
+    const res = await request(app)
+      .post("/avatar")
+      .set(headers)
+      .attach("avatar", Buffer.from("fake-image"), "avatar.jpg");
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.avatar_url).toMatch(/^avatars\/staff-1\/\d+-avatar\.jpg$/);
+    expect(supabase.storage.from).toHaveBeenCalledWith("bg-photos");
+    expect(storageFromResult.upload).toHaveBeenCalledWith(
+      res.body.avatar_url,
+      expect.any(Buffer),
+      expect.objectContaining({ contentType: "image/jpeg" })
+    );
   });
 });

@@ -803,6 +803,95 @@ router.get("/site/:site_id", authenticate, requireRole("admin"), async (req, res
   return res.status(200).json({ attendance });
 });
 
+const DEFAULT_RECENT_LIMIT = 10;
+const MAX_RECENT_LIMIT = 50;
+
+/**
+ * @swagger
+ * /attendance/recent:
+ *   get:
+ *     summary: Get the most recent attendance records across all staff and sites
+ *     tags: [Attendance]
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         required: false
+ *         schema: { type: integer, minimum: 1, maximum: 50, default: 10 }
+ *     responses:
+ *       200:
+ *         description: Most recent attendance records with staff, site details and photos, ordered by clock_in desc
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 attendance:
+ *                   type: array
+ *                   items: { $ref: '#/components/schemas/AttendanceWithDetails' }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not an admin
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
+router.get("/recent", authenticate, requireRole("admin"), async (req, res) => {
+  const requestedLimit = parseInt(req.query.limit, 10);
+  const limit =
+    Number.isFinite(requestedLimit) && requestedLimit > 0
+      ? Math.min(requestedLimit, MAX_RECENT_LIMIT)
+      : DEFAULT_RECENT_LIMIT;
+
+  const { data: attendanceRows, error: attendanceError } = await supabase
+    .from("attendance")
+    .select("*")
+    .order("clock_in", { ascending: false })
+    .limit(limit);
+
+  if (attendanceError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  const { staffById, error: staffError } = await attachStaff(attendanceRows);
+
+  if (staffError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  const { sitesById, error: sitesError } = await attachSites(attendanceRows);
+
+  if (sitesError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  const { photosByAttendanceId, error: photosError } = await attachPhotos(attendanceRows);
+
+  if (photosError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  const attendance = attendanceRows.map((row) => ({
+    ...row,
+    staff: staffById[row.staff_id] ?? null,
+    site: sitesById[row.site_id] ?? null,
+    photos: photosByAttendanceId[row.id] ?? [],
+  }));
+
+  return res.status(200).json({ attendance });
+});
+
 /**
  * @swagger
  * /attendance/client-history:

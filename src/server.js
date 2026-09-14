@@ -24,11 +24,10 @@ process.on("uncaughtException", (err) => {
 process.on("unhandledRejection", (reason) => {
   console.error("Unhandled Rejection:", reason);
   process.exit(1);
-});
-
+}); 
 const app = express();
 app.use(helmet());
-app.use(cors({origin: process.env.ALLOWED_ORIGIN}))
+app.use(cors({origin: [process.env.ALLOWED_ORIGIN, "http://localhost:8081", "http://localhost:19006"]}))
 app.use(rateLimit({windowMs: 15*60*1000, max: 100}));
 
 app.use(morgan("dev"));
@@ -49,6 +48,10 @@ app.use("/profile", profileRoutes);
 app.use("/sites", sitesRoutes);
 app.use("/attendance", attendanceRoutes);
 app.use("/notes", notesRoutes);
+
+app.get("/api-docs.json", (req, res) => {
+  res.json(swaggerSpec);
+});
 
 app.use(
   "/api-docs",

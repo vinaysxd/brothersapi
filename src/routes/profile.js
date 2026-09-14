@@ -1,10 +1,13 @@
 import { Router } from "express";
+import multer from "multer";
 import { body, validationResult } from "express-validator";
 import { supabase } from "../config/supabase.js";
 import { authenticate } from "../middleware/auth.js";
 import { ERRORS } from "../constants/errors.js";
 
 const router = Router();
+const avatarUpload = multer({ storage: multer.memoryStorage() });
+const AVATAR_BUCKET = "bg-photos";
 
 const pick = (source, fields) => {
   const result = {};
@@ -24,7 +27,9 @@ const pick = (source, fields) => {
  *     tags: [Profile]
  *     responses:
  *       200:
- *         description: The current user's profile, merged with staff_profile or client_profile if applicable
+ *         description: >
+ *           The current user's profile, merged with staff_profile or client_profile if applicable.
+ *           If avatar_url is set, a signed_avatar_url (valid for 1 hour) is also included.
  *         content:
  *           application/json:
  *             schema:
@@ -90,7 +95,21 @@ router.get("/me", authenticate, async (req, res) => {
     roleProfile = data;
   }
 
-  return res.status(200).json({ ...profile, ...roleProfile });
+  let signed_avatar_url = null;
+
+  if (profile.avatar_url) {
+    const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+      .from(AVATAR_BUCKET)
+      .createSignedUrl(profile.avatar_url, 3600);
+
+    if (signedUrlError) {
+      return res.status(500).json(ERRORS.SERVER_ERROR);
+    }
+
+    signed_avatar_url = signedUrlData?.signedUrl ?? null;
+  }
+
+  return res.status(200).json({ ...profile, ...roleProfile, signed_avatar_url });
 });
 
 const profileUpdateValidators = [
@@ -243,6 +262,67 @@ router.put("/me", authenticate, profileUpdateValidators, async (req, res) => {
   }
 
   return res.status(200).json({ ...updatedProfile, ...roleProfile });
+});
+
+/**
+ * @swagger
+ * /profile/avatar:
+ *   post:
+ *     summary: Upload the current user's avatar image
+ *     tags: [Profile]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required: [avatar]
+ *             properties:
+ *               avatar: { type: string, format: binary }
+ *     responses:
+ *       200:
+ *         description: Avatar uploaded successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 avatar_url: { type: string }
+ *       400:
+ *         description: Missing file
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "VAL_001", message: "Validation error" }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
+router.post("/avatar", authenticate, avatarUpload.single("avatar"), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json(ERRORS.VALIDATION_ERROR);
+  }
+
+  const filePath = `avatars/${req.user.id}/${Date.now()}-${req.file.originalname}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from(AVATAR_BUCKET)
+    .upload(filePath, req.file.buffer, { contentType: req.file.mimetype });
+
+  if (uploadError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  return res.status(200).json({ avatar_url: filePath });
 });
 
 export default router;

@@ -130,6 +130,7 @@ router.post(
       full_name,
       phone,
       role,
+      is_active: false,
     });
 
     if (profileError) {
@@ -202,7 +203,8 @@ router.get("/staff", authenticate, requireRole("admin"), async (req, res) => {
   const { data: profiles, error: profilesError } = await supabase
     .from("profiles")
     .select("*")
-    .eq("role", "staff");
+    .eq("role", "staff")
+    .order("is_active", { ascending: false });
 
   if (profilesError) {
     return res.status(500).json(ERRORS.SERVER_ERROR);
@@ -230,6 +232,7 @@ router.get("/staff", authenticate, requireRole("admin"), async (req, res) => {
   const staff = profiles.map((profile) => ({
     ...profile,
     ...staffProfileById[profile.id],
+    is_active: profile.is_active,
   }));
 
   return res.status(200).json({ staff });
@@ -306,7 +309,9 @@ router.get("/staff/:id", authenticate, requireRole("admin"), async (req, res) =>
     return res.status(500).json(ERRORS.SERVER_ERROR);
   }
 
-  return res.status(200).json({ staff: { ...profile, ...staffProfile } });
+  return res.status(200).json({
+    staff: { ...profile, ...staffProfile, is_active: profile.is_active },
+  });
 });
 
 const staffUpdateValidators = [
@@ -318,12 +323,6 @@ const staffUpdateValidators = [
     .trim()
     .notEmpty()
     .withMessage("avatar_url must be a non-empty string"),
-  body("employee_id")
-    .optional()
-    .isString()
-    .trim()
-    .notEmpty()
-    .withMessage("employee_id must be a non-empty string"),
   body("address").optional().isString().trim().notEmpty().withMessage("address must be a non-empty string"),
   body("emergency_contact")
     .optional()
@@ -353,7 +352,6 @@ const staffUpdateValidators = [
  *               full_name: { type: string }
  *               phone: { type: string }
  *               avatar_url: { type: string }
- *               employee_id: { type: string }
  *               address: { type: string }
  *               emergency_contact: { type: string }
  *     responses:
@@ -403,6 +401,7 @@ router.put(
   staffUpdateValidators,
   async (req, res) => {
     const errors = validationResult(req);
+    console.log(errors)
     if (!errors.isEmpty()) {
       return res.status(400).json(ERRORS.VALIDATION_ERROR);
     }
@@ -435,7 +434,7 @@ router.put(
       return res.status(500).json(ERRORS.SERVER_ERROR);
     }
 
-    const staffFields = pick(req.body, ["employee_id", "address", "emergency_contact"]);
+    const staffFields = pick(req.body, ["address", "emergency_contact"]);
 
     const { data: staffProfile, error: updateStaffError } = await supabase
       .from("staff_profile")
@@ -527,6 +526,79 @@ router.delete("/staff/:id", authenticate, requireRole("admin"), async (req, res)
 
 /**
  * @swagger
+ * /admin/staff/{id}/reactivate:
+ *   patch:
+ *     summary: Reactivate a staff member
+ *     tags: [Admin]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Staff reactivated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message: { type: string, example: "Staff reactivated successfully" }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not an admin
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Staff member not found
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "USR_001", message: "User not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
+router.patch("/staff/:id/reactivate", authenticate, requireRole("admin"), async (req, res) => {
+  const { data: existingProfile, error: fetchError } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("id", req.params.id)
+    .eq("role", "staff")
+    .maybeSingle();
+
+  if (fetchError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  if (!existingProfile) {
+    return res.status(404).json(ERRORS.USER_NOT_FOUND);
+  }
+
+  const { error: updateError } = await supabase
+    .from("profiles")
+    .update({ is_active: true })
+    .eq("id", req.params.id);
+
+  if (updateError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  return res.status(200).json({ message: "Staff reactivated successfully" });
+});
+
+/**
+ * @swagger
  * /admin/clients:
  *   get:
  *     summary: List all clients
@@ -565,7 +637,8 @@ router.get("/clients", authenticate, requireRole("admin"), async (req, res) => {
   const { data: profiles, error: profilesError } = await supabase
     .from("profiles")
     .select("*")
-    .eq("role", "client");
+    .eq("role", "client")
+    .order("is_active", { ascending: false });
 
   if (profilesError) {
     return res.status(500).json(ERRORS.SERVER_ERROR);
@@ -593,6 +666,7 @@ router.get("/clients", authenticate, requireRole("admin"), async (req, res) => {
   const clients = profiles.map((profile) => ({
     ...profile,
     ...clientProfileById[profile.id],
+    is_active: profile.is_active,
   }));
 
   return res.status(200).json({ clients });
@@ -669,7 +743,9 @@ router.get("/clients/:id", authenticate, requireRole("admin"), async (req, res) 
     return res.status(500).json(ERRORS.SERVER_ERROR);
   }
 
-  return res.status(200).json({ client: { ...profile, ...clientProfile } });
+  return res.status(200).json({
+    client: { ...profile, ...clientProfile, is_active: profile.is_active },
+  });
 });
 
 const clientUpdateValidators = [
@@ -891,6 +967,79 @@ router.delete("/clients/:id", authenticate, requireRole("admin"), async (req, re
   }
 
   return res.status(200).json({ message: "Client deactivated successfully" });
+});
+
+/**
+ * @swagger
+ * /admin/clients/{id}/reactivate:
+ *   patch:
+ *     summary: Reactivate a client
+ *     tags: [Admin]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Client reactivated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message: { type: string, example: "Client reactivated successfully" }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not an admin
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Client not found
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "USR_001", message: "User not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
+router.patch("/clients/:id/reactivate", authenticate, requireRole("admin"), async (req, res) => {
+  const { data: existingProfile, error: fetchError } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("id", req.params.id)
+    .eq("role", "client")
+    .maybeSingle();
+
+  if (fetchError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  if (!existingProfile) {
+    return res.status(404).json(ERRORS.USER_NOT_FOUND);
+  }
+
+  const { error: updateError } = await supabase
+    .from("profiles")
+    .update({ is_active: true })
+    .eq("id", req.params.id);
+
+  if (updateError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  return res.status(200).json({ message: "Client reactivated successfully" });
 });
 
 export default router;

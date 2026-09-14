@@ -43,6 +43,7 @@ const chain = (result) => {
   builder.gte = jest.fn(() => builder);
   builder.lt = jest.fn(() => builder);
   builder.order = jest.fn(() => builder);
+  builder.limit = jest.fn(() => builder);
   builder.single = jest.fn(() => Promise.resolve(result));
   builder.maybeSingle = jest.fn(() => Promise.resolve(result));
   builder.then = (resolve) => resolve(result);
@@ -1004,6 +1005,176 @@ describe("GET /attendance/site/:site_id", () => {
         },
       ],
     });
+  });
+});
+
+describe("GET /attendance/recent", () => {
+  it("blocks requests with no token", async () => {
+    const res = await request(app).get("/recent");
+
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual(ERRORS.AUTH_NO_TOKEN);
+  });
+
+  it("blocks a non-admin authenticated user", async () => {
+    const headers = asUser(STAFF_USER);
+
+    const res = await request(app).get("/recent").set(headers);
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual(ERRORS.AUTH_UNAUTHORIZED);
+  });
+
+  it("returns 500 when fetching attendance fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).get("/recent").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns an empty list without further queries when there is no attendance", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: [], error: null }));
+
+    const res = await request(app).get("/recent").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ attendance: [] });
+    expect(supabase.from).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 500 when fetching staff details fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(
+        chain({ data: [{ id: "att-1", staff_id: "staff-1", site_id: "site-1" }], error: null })
+      )
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).get("/recent").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns 500 when fetching site details fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(
+        chain({ data: [{ id: "att-1", staff_id: "staff-1", site_id: "site-1" }], error: null })
+      )
+      .mockReturnValueOnce(chain({ data: [{ id: "staff-1", full_name: "Staff One" }], error: null }))
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).get("/recent").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns 500 when fetching photos fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(
+        chain({ data: [{ id: "att-1", staff_id: "staff-1", site_id: "site-1" }], error: null })
+      )
+      .mockReturnValueOnce(chain({ data: [{ id: "staff-1", full_name: "Staff One" }], error: null }))
+      .mockReturnValueOnce(chain({ data: [{ id: "site-1", name: "Site One" }], error: null }))
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).get("/recent").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns recent attendance with staff, site details and photos, defaulting the limit to 10", async () => {
+    const headers = asUser(ADMIN_USER);
+    const attendanceChain = chain({
+      data: [
+        {
+          id: "att-1",
+          staff_id: "staff-1",
+          site_id: "site-1",
+          clock_in: "2026-08-31T09:00:00.000Z",
+        },
+      ],
+      error: null,
+    });
+    supabase.from
+      .mockReturnValueOnce(attendanceChain)
+      .mockReturnValueOnce(
+        chain({
+          data: [{ id: "staff-1", full_name: "Staff One", email: "staff@example.com", phone: "555-0100" }],
+          error: null,
+        })
+      )
+      .mockReturnValueOnce(
+        chain({ data: [{ id: "site-1", name: "Site One", address: "1 Main St" }], error: null })
+      )
+      .mockReturnValueOnce(
+        chain({ data: [{ id: "photo-1", attendance_id: "att-1" }], error: null })
+      );
+
+    const res = await request(app).get("/recent").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      attendance: [
+        {
+          id: "att-1",
+          staff_id: "staff-1",
+          site_id: "site-1",
+          clock_in: "2026-08-31T09:00:00.000Z",
+          staff: {
+            id: "staff-1",
+            full_name: "Staff One",
+            email: "staff@example.com",
+            phone: "555-0100",
+          },
+          site: { id: "site-1", name: "Site One", address: "1 Main St" },
+          photos: [{ id: "photo-1", attendance_id: "att-1" }],
+        },
+      ],
+    });
+    expect(attendanceChain.order).toHaveBeenCalledWith("clock_in", { ascending: false });
+    expect(attendanceChain.limit).toHaveBeenCalledWith(10);
+  });
+
+  it("uses the limit query param when provided", async () => {
+    const headers = asUser(ADMIN_USER);
+    const attendanceChain = chain({ data: [], error: null });
+    supabase.from.mockReturnValueOnce(attendanceChain);
+
+    const res = await request(app).get("/recent?limit=5").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(attendanceChain.limit).toHaveBeenCalledWith(5);
+  });
+
+  it("caps the limit query param at 50", async () => {
+    const headers = asUser(ADMIN_USER);
+    const attendanceChain = chain({ data: [], error: null });
+    supabase.from.mockReturnValueOnce(attendanceChain);
+
+    const res = await request(app).get("/recent?limit=500").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(attendanceChain.limit).toHaveBeenCalledWith(50);
+  });
+
+  it("falls back to the default limit when the query param is invalid", async () => {
+    const headers = asUser(ADMIN_USER);
+    const attendanceChain = chain({ data: [], error: null });
+    supabase.from.mockReturnValueOnce(attendanceChain);
+
+    const res = await request(app).get("/recent?limit=not-a-number").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(attendanceChain.limit).toHaveBeenCalledWith(10);
   });
 });
 
