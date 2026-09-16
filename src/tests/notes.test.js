@@ -406,26 +406,77 @@ describe("GET /notes/:site_id/staff-view", () => {
     expect(res.body).toEqual(ERRORS.SERVER_ERROR);
   });
 
-  it("returns both staff and client notes for the site", async () => {
+  it("returns an empty list without querying authors when there are no notes", async () => {
+    const headers = asUser(STAFF_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { site_id: "site-1" }, error: null }))
+      .mockReturnValueOnce(chain({ data: [], error: null }));
+
+    const res = await request(app).get("/site-1/staff-view").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ notes: [] });
+    expect(supabase.from).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns 500 when fetching author details fails", async () => {
+    const headers = asUser(STAFF_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { site_id: "site-1" }, error: null }))
+      .mockReturnValueOnce(
+        chain({ data: [{ id: "note-1", author_id: "staff-1", site_id: "site-1" }], error: null })
+      )
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).get("/site-1/staff-view").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns both staff and client notes for the site with author details", async () => {
     const headers = asUser(STAFF_USER);
     const notesChain = chain({
       data: [
-        { id: "note-1", site_id: "site-1", type: "staff", note: "Staff note" },
-        { id: "note-2", site_id: "site-1", type: "client", note: "Client note" },
+        { id: "note-1", author_id: "staff-1", site_id: "site-1", type: "staff", note: "Staff note" },
+        { id: "note-2", author_id: "client-user-1", site_id: "site-1", type: "client", note: "Client note" },
       ],
       error: null,
     });
     supabase.from
       .mockReturnValueOnce(chain({ data: { site_id: "site-1" }, error: null }))
-      .mockReturnValueOnce(notesChain);
+      .mockReturnValueOnce(notesChain)
+      .mockReturnValueOnce(
+        chain({
+          data: [
+            { id: "staff-1", full_name: "Staff One", role: "staff" },
+            { id: "client-user-1", full_name: "Client One", role: "client" },
+          ],
+          error: null,
+        })
+      );
 
     const res = await request(app).get("/site-1/staff-view").set(headers);
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual({
       notes: [
-        { id: "note-1", site_id: "site-1", type: "staff", note: "Staff note" },
-        { id: "note-2", site_id: "site-1", type: "client", note: "Client note" },
+        {
+          id: "note-1",
+          author_id: "staff-1",
+          site_id: "site-1",
+          type: "staff",
+          note: "Staff note",
+          author: { id: "staff-1", full_name: "Staff One", role: "staff" },
+        },
+        {
+          id: "note-2",
+          author_id: "client-user-1",
+          site_id: "site-1",
+          type: "client",
+          note: "Client note",
+          author: { id: "client-user-1", full_name: "Client One", role: "client" },
+        },
       ],
     });
     expect(notesChain.order).toHaveBeenCalledWith("created_at", { ascending: false });
@@ -506,16 +557,54 @@ describe("GET /notes/:site_id/client-view", () => {
     expect(res.body).toEqual(ERRORS.SERVER_ERROR);
   });
 
-  it("returns both staff and client notes for the client's site", async () => {
+  it("returns an empty list without querying authors when there are no notes", async () => {
+    const headers = asUser(CLIENT_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "cp-1" }, error: null }))
+      .mockReturnValueOnce(chain({ data: { id: "site-1" }, error: null }))
+      .mockReturnValueOnce(chain({ data: [], error: null }));
+
+    const res = await request(app).get("/site-1/client-view").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ notes: [] });
+    expect(supabase.from).toHaveBeenCalledTimes(3);
+  });
+
+  it("returns 500 when fetching author details fails", async () => {
     const headers = asUser(CLIENT_USER);
     supabase.from
       .mockReturnValueOnce(chain({ data: { id: "cp-1" }, error: null }))
       .mockReturnValueOnce(chain({ data: { id: "site-1" }, error: null }))
       .mockReturnValueOnce(
+        chain({ data: [{ id: "note-1", author_id: "staff-1", site_id: "site-1" }], error: null })
+      )
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).get("/site-1/client-view").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns both staff and client notes for the client's site with author details", async () => {
+    const headers = asUser(CLIENT_USER);
+    const notesChain = chain({
+      data: [
+        { id: "note-1", author_id: "staff-1", site_id: "site-1", type: "staff", note: "Staff note" },
+        { id: "note-2", author_id: "client-user-1", site_id: "site-1", type: "client", note: "Client note" },
+      ],
+      error: null,
+    });
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "cp-1" }, error: null }))
+      .mockReturnValueOnce(chain({ data: { id: "site-1" }, error: null }))
+      .mockReturnValueOnce(notesChain)
+      .mockReturnValueOnce(
         chain({
           data: [
-            { id: "note-1", site_id: "site-1", type: "staff", note: "Staff note" },
-            { id: "note-2", site_id: "site-1", type: "client", note: "Client note" },
+            { id: "staff-1", full_name: "Staff One", role: "staff" },
+            { id: "client-user-1", full_name: "Client One", role: "client" },
           ],
           error: null,
         })
@@ -526,8 +615,22 @@ describe("GET /notes/:site_id/client-view", () => {
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual({
       notes: [
-        { id: "note-1", site_id: "site-1", type: "staff", note: "Staff note" },
-        { id: "note-2", site_id: "site-1", type: "client", note: "Client note" },
+        {
+          id: "note-1",
+          author_id: "staff-1",
+          site_id: "site-1",
+          type: "staff",
+          note: "Staff note",
+          author: { id: "staff-1", full_name: "Staff One", role: "staff" },
+        },
+        {
+          id: "note-2",
+          author_id: "client-user-1",
+          site_id: "site-1",
+          type: "client",
+          note: "Client note",
+          author: { id: "client-user-1", full_name: "Client One", role: "client" },
+        },
       ],
     });
   });

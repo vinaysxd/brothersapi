@@ -363,7 +363,7 @@ router.get("/:site_id/staff-view", authenticate, requireRole("staff"), async (re
     return res.status(403).json(ERRORS.AUTH_UNAUTHORIZED);
   }
 
-  const { data: notes, error: notesError } = await supabase
+  const { data: noteRows, error: notesError } = await supabase
     .from("site_notes")
     .select("*")
     .eq("site_id", site_id)
@@ -372,6 +372,17 @@ router.get("/:site_id/staff-view", authenticate, requireRole("staff"), async (re
   if (notesError) {
     return res.status(500).json(ERRORS.SERVER_ERROR);
   }
+
+  const { authorsById, error: authorsError } = await attachAuthors(noteRows);
+
+  if (authorsError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  const notes = noteRows.map((row) => ({
+    ...row,
+    author: authorsById[row.author_id] ?? null,
+  }));
 
   return res.status(200).json({ notes });
 });
@@ -455,7 +466,7 @@ router.get("/:site_id/client-view", authenticate, requireRole("client"), async (
     return res.status(403).json(ERRORS.AUTH_UNAUTHORIZED);
   }
 
-  const { data: notes, error: notesError } = await supabase
+  const { data: noteRows, error: notesError } = await supabase
     .from("site_notes")
     .select("*")
     .eq("site_id", site_id)
@@ -464,6 +475,17 @@ router.get("/:site_id/client-view", authenticate, requireRole("client"), async (
   if (notesError) {
     return res.status(500).json(ERRORS.SERVER_ERROR);
   }
+
+  const { authorsById, error: authorsError } = await attachAuthors(noteRows);
+
+  if (authorsError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  const notes = noteRows.map((row) => ({
+    ...row,
+    author: authorsById[row.author_id] ?? null,
+  }));
 
   return res.status(200).json({ notes });
 });

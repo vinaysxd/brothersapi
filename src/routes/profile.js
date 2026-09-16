@@ -75,7 +75,7 @@ router.get("/me", authenticate, async (req, res) => {
       .select("*")
       .eq("profile_id", req.user.id)
       .single();
-
+      console.log("profile",data,error)
     if (error) {
       return res.status(500).json(ERRORS.SERVER_ERROR);
     }
@@ -101,14 +101,14 @@ router.get("/me", authenticate, async (req, res) => {
     const { data: signedUrlData, error: signedUrlError } = await supabase.storage
       .from(AVATAR_BUCKET)
       .createSignedUrl(profile.avatar_url, 3600);
-
+    console.log("signedUrlError",profile.avatar_url,signedUrlError)
     if (signedUrlError) {
       return res.status(500).json(ERRORS.SERVER_ERROR);
     }
 
     signed_avatar_url = signedUrlData?.signedUrl ?? null;
   }
-
+  console.log("=============",profile)
   return res.status(200).json({ ...profile, ...roleProfile, signed_avatar_url });
 });
 

@@ -48,7 +48,7 @@ const validSiteBody = {
   address: "123 Main St",
   latitude: 40.7128,
   longitude: -74.006,
-  client_id: "profile-1",
+  client_id: "client-1",
 };
 
 let app;
@@ -134,7 +134,7 @@ describe("POST /sites", () => {
   it("returns 500 when inserting the site fails", async () => {
     const headers = asUser(ADMIN_USER);
     supabase.from
-      .mockReturnValueOnce(chain({ data: { id: "cp-1" }, error: null }))
+      .mockReturnValueOnce(chain({ data: { id: "client-1" }, error: null }))
       .mockReturnValueOnce(chain({ data: null, error: { message: "insert failed" } }));
 
     const res = await request(app).post("/").set(headers).send(validSiteBody);
@@ -143,11 +143,11 @@ describe("POST /sites", () => {
     expect(res.body).toEqual(ERRORS.SERVER_ERROR);
   });
 
-  it("creates a site with created_by set to the admin's id, storing client_profile.id", async () => {
+  it("creates a site with created_by set to the admin's id", async () => {
     const headers = asUser(ADMIN_USER);
-    const clientChain = chain({ data: { id: "cp-1" }, error: null });
+    const clientChain = chain({ data: { id: "client-1" }, error: null });
     const insertChain = chain({
-      data: { id: "site-1", ...validSiteBody, client_id: "cp-1", created_by: "admin-1" },
+      data: { id: "site-1", ...validSiteBody, created_by: "admin-1" },
       error: null,
     });
     supabase.from.mockReturnValueOnce(clientChain).mockReturnValueOnce(insertChain);
@@ -155,17 +155,11 @@ describe("POST /sites", () => {
     const res = await request(app).post("/").set(headers).send(validSiteBody);
 
     expect(res.statusCode).toBe(201);
-    expect(res.body.site).toEqual({
-      id: "site-1",
-      ...validSiteBody,
-      client_id: "cp-1",
-      created_by: "admin-1",
-    });
+    expect(res.body.site).toEqual({ id: "site-1", ...validSiteBody, created_by: "admin-1" });
     expect(supabase.from).toHaveBeenNthCalledWith(1, "client_profile");
-    expect(clientChain.eq).toHaveBeenCalledWith("profile_id", "profile-1");
+    expect(clientChain.eq).toHaveBeenCalledWith("id", "client-1");
     expect(insertChain.insert).toHaveBeenCalledWith({
       ...validSiteBody,
-      client_id: "cp-1",
       created_by: "admin-1",
     });
   });
@@ -356,7 +350,7 @@ describe("GET /sites/my-sites", () => {
     expect(res.body).toEqual(ERRORS.SERVER_ERROR);
   });
 
-  it("returns the staff member's active assigned sites", async () => {
+  it("returns the staff member's active assigned sites with client details", async () => {
     const headers = asUser(STAFF_USER);
     const assignmentsChain = chain({
       data: [{ site_id: "site-1" }, { site_id: "site-2" }],
@@ -364,20 +358,52 @@ describe("GET /sites/my-sites", () => {
     });
     const sitesChain = chain({
       data: [
-        { id: "site-1", name: "Site One", is_active: true },
-        { id: "site-2", name: "Site Two", is_active: true },
+        { id: "site-1", name: "Site One", is_active: true, client_id: "cp-1" },
+        { id: "site-2", name: "Site Two", is_active: true, client_id: "cp-2" },
       ],
       error: null,
     });
-    supabase.from.mockReturnValueOnce(assignmentsChain).mockReturnValueOnce(sitesChain);
+    supabase.from
+      .mockReturnValueOnce(assignmentsChain)
+      .mockReturnValueOnce(sitesChain)
+      .mockReturnValueOnce(
+        chain({
+          data: [
+            { id: "cp-1", profile_id: "prof-1", company_name: "Acme Co" },
+            { id: "cp-2", profile_id: "prof-2", company_name: "Beta Co" },
+          ],
+          error: null,
+        })
+      )
+      .mockReturnValueOnce(
+        chain({
+          data: [
+            { id: "prof-1", full_name: "Client One" },
+            { id: "prof-2", full_name: "Client Two" },
+          ],
+          error: null,
+        })
+      );
 
     const res = await request(app).get("/my-sites").set(headers);
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual({
       sites: [
-        { id: "site-1", name: "Site One", is_active: true },
-        { id: "site-2", name: "Site Two", is_active: true },
+        {
+          id: "site-1",
+          name: "Site One",
+          is_active: true,
+          client_id: "cp-1",
+          client: { id: "cp-1", profile_id: "prof-1", company_name: "Acme Co", full_name: "Client One" },
+        },
+        {
+          id: "site-2",
+          name: "Site Two",
+          is_active: true,
+          client_id: "cp-2",
+          client: { id: "cp-2", profile_id: "prof-2", company_name: "Beta Co", full_name: "Client Two" },
+        },
       ],
     });
     expect(assignmentsChain.eq).toHaveBeenCalledWith("profile_id", "staff-1");
@@ -447,17 +473,30 @@ describe("GET /sites/my-sites/:id", () => {
     expect(res.body).toEqual(ERRORS.SITE_NOT_FOUND);
   });
 
-  it("returns the assigned site", async () => {
+  it("returns the assigned site with client details", async () => {
     const headers = asUser(STAFF_USER);
     const assignmentChain = chain({ data: { site_id: "site-1" }, error: null });
     supabase.from
       .mockReturnValueOnce(assignmentChain)
-      .mockReturnValueOnce(chain({ data: { id: "site-1", name: "Site One" }, error: null }));
+      .mockReturnValueOnce(
+        chain({ data: { id: "site-1", name: "Site One", client_id: "cp-1" }, error: null })
+      )
+      .mockReturnValueOnce(
+        chain({ data: { id: "cp-1", profile_id: "prof-1", company_name: "Acme Co" }, error: null })
+      )
+      .mockReturnValueOnce(chain({ data: { full_name: "Client One" }, error: null }));
 
     const res = await request(app).get("/my-sites/site-1").set(headers);
 
     expect(res.statusCode).toBe(200);
-    expect(res.body).toEqual({ site: { id: "site-1", name: "Site One" } });
+    expect(res.body).toEqual({
+      site: {
+        id: "site-1",
+        name: "Site One",
+        client_id: "cp-1",
+        client: { id: "cp-1", profile_id: "prof-1", company_name: "Acme Co", full_name: "Client One" },
+      },
+    });
     expect(assignmentChain.eq).toHaveBeenCalledWith("site_id", "site-1");
     expect(assignmentChain.eq).toHaveBeenCalledWith("profile_id", "staff-1");
   });
@@ -594,7 +633,38 @@ describe("GET /sites/client-sites/:id", () => {
     expect(res.body).toEqual(ERRORS.SITE_NOT_FOUND);
   });
 
-  it("returns the client's site", async () => {
+  it("returns 500 when fetching site_staff fails", async () => {
+    const headers = asUser(CLIENT_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "cp-1" }, error: null }))
+      .mockReturnValueOnce(
+        chain({ data: { id: "site-1", name: "Site One", client_id: "cp-1" }, error: null })
+      )
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).get("/client-sites/site-1").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns 500 when fetching staff profiles fails", async () => {
+    const headers = asUser(CLIENT_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "cp-1" }, error: null }))
+      .mockReturnValueOnce(
+        chain({ data: { id: "site-1", name: "Site One", client_id: "cp-1" }, error: null })
+      )
+      .mockReturnValueOnce(chain({ data: [{ profile_id: "staff-2" }], error: null }))
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).get("/client-sites/site-1").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns the client's site with an empty staff array when no staff are assigned", async () => {
     const headers = asUser(CLIENT_USER);
     const siteChain = chain({
       data: { id: "site-1", name: "Site One", client_id: "cp-1" },
@@ -602,16 +672,70 @@ describe("GET /sites/client-sites/:id", () => {
     });
     supabase.from
       .mockReturnValueOnce(chain({ data: { id: "cp-1" }, error: null }))
-      .mockReturnValueOnce(siteChain);
+      .mockReturnValueOnce(siteChain)
+      .mockReturnValueOnce(chain({ data: [], error: null }));
 
     const res = await request(app).get("/client-sites/site-1").set(headers);
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual({
-      site: { id: "site-1", name: "Site One", client_id: "cp-1" },
+      site: { id: "site-1", name: "Site One", client_id: "cp-1", staff: [] },
     });
     expect(siteChain.eq).toHaveBeenCalledWith("id", "site-1");
     expect(siteChain.eq).toHaveBeenCalledWith("client_id", "cp-1");
+  });
+
+  it("returns the client's site with its assigned staff", async () => {
+    const headers = asUser(CLIENT_USER);
+    const siteChain = chain({
+      data: { id: "site-1", name: "Site One", client_id: "cp-1" },
+      error: null,
+    });
+    const siteStaffChain = chain({
+      data: [{ profile_id: "staff-2" }, { profile_id: "staff-3" }],
+      error: null,
+    });
+    const profilesChain = chain({
+      data: [
+        { id: "staff-2", full_name: "Staff Two", phone: "111", avatar_url: null, is_active: true },
+        {
+          id: "staff-3",
+          full_name: "Staff Three",
+          phone: "222",
+          avatar_url: null,
+          is_active: false,
+        },
+      ],
+      error: null,
+    });
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "cp-1" }, error: null }))
+      .mockReturnValueOnce(siteChain)
+      .mockReturnValueOnce(siteStaffChain)
+      .mockReturnValueOnce(profilesChain);
+
+    const res = await request(app).get("/client-sites/site-1").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      site: {
+        id: "site-1",
+        name: "Site One",
+        client_id: "cp-1",
+        staff: [
+          { id: "staff-2", full_name: "Staff Two", phone: "111", avatar_url: null, is_active: true },
+          {
+            id: "staff-3",
+            full_name: "Staff Three",
+            phone: "222",
+            avatar_url: null,
+            is_active: false,
+          },
+        ],
+      },
+    });
+    expect(siteStaffChain.eq).toHaveBeenCalledWith("site_id", "site-1");
+    expect(profilesChain.in).toHaveBeenCalledWith("id", ["staff-2", "staff-3"]);
   });
 });
 
@@ -888,7 +1012,7 @@ describe("PUT /sites/:id", () => {
       .mockReturnValueOnce(chain({ data: { id: "site-1" }, error: null }))
       .mockReturnValueOnce(chain({ data: null, error: null }));
 
-    const res = await request(app).put("/site-1").set(headers).send({ client_id: "profile-2" });
+    const res = await request(app).put("/site-1").set(headers).send({ client_id: "client-2" });
 
     expect(res.statusCode).toBe(404);
     expect(res.body).toEqual(ERRORS.USER_NOT_FOUND);
@@ -921,11 +1045,11 @@ describe("PUT /sites/:id", () => {
     expect(updateChain.update).toHaveBeenCalledWith({ name: "New Name" });
   });
 
-  it("updates the site including a validated client_id, storing client_profile.id", async () => {
+  it("updates the site including a validated client_id", async () => {
     const headers = asUser(ADMIN_USER);
-    const clientChain = chain({ data: { id: "cp-2" }, error: null });
+    const clientChain = chain({ data: { id: "client-2" }, error: null });
     const updateChain = chain({
-      data: { id: "site-1", name: "Old Name", client_id: "cp-2" },
+      data: { id: "site-1", name: "Old Name", client_id: "client-2" },
       error: null,
     });
     supabase.from
@@ -933,11 +1057,11 @@ describe("PUT /sites/:id", () => {
       .mockReturnValueOnce(clientChain)
       .mockReturnValueOnce(updateChain);
 
-    const res = await request(app).put("/site-1").set(headers).send({ client_id: "profile-2" });
+    const res = await request(app).put("/site-1").set(headers).send({ client_id: "client-2" });
 
     expect(res.statusCode).toBe(200);
-    expect(clientChain.eq).toHaveBeenCalledWith("profile_id", "profile-2");
-    expect(updateChain.update).toHaveBeenCalledWith({ client_id: "cp-2" });
+    expect(clientChain.eq).toHaveBeenCalledWith("id", "client-2");
+    expect(updateChain.update).toHaveBeenCalledWith({ client_id: "client-2" });
   });
 });
 

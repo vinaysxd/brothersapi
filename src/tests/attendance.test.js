@@ -52,6 +52,7 @@ const chain = (result) => {
 
 const storageChain = (uploadResult) => ({
   upload: jest.fn().mockResolvedValue(uploadResult),
+  createSignedUrl: jest.fn(),
 });
 
 const PHOTO_PATH_PATTERN = /^attendance\/att-1\/\d+-photo\.jpg$/;
@@ -446,6 +447,108 @@ describe("POST /attendance/clockout", () => {
   });
 });
 
+describe("GET /attendance/active", () => {
+  it("blocks requests with no token", async () => {
+    const res = await request(app).get("/active");
+
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual(ERRORS.AUTH_NO_TOKEN);
+  });
+
+  it("blocks a non-staff authenticated user", async () => {
+    const headers = asUser(ADMIN_USER);
+
+    const res = await request(app).get("/active").set(headers);
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual(ERRORS.AUTH_UNAUTHORIZED);
+  });
+
+  it("returns 500 when fetching the open attendance record fails", async () => {
+    const headers = asUser(STAFF_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).get("/active").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns active: false when there is no open attendance record", async () => {
+    const headers = asUser(STAFF_USER);
+    const attendanceChain = chain({ data: null, error: null });
+    supabase.from.mockReturnValueOnce(attendanceChain);
+
+    const res = await request(app).get("/active").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ active: false });
+    expect(attendanceChain.eq).toHaveBeenCalledWith("staff_id", "staff-1");
+    expect(attendanceChain.is).toHaveBeenCalledWith("clock_out", null);
+    expect(supabase.from).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 500 when fetching site details fails", async () => {
+    const headers = asUser(STAFF_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "att-1", site_id: "site-1" }, error: null }))
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).get("/active").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns 500 when fetching photos fails", async () => {
+    const headers = asUser(STAFF_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "att-1", site_id: "site-1" }, error: null }))
+      .mockReturnValueOnce(chain({ data: { name: "Site One" }, error: null }))
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).get("/active").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns active: true with site details and photos", async () => {
+    const headers = asUser(STAFF_USER);
+    supabase.from
+      .mockReturnValueOnce(
+        chain({
+          data: { id: "att-1", staff_id: "staff-1", site_id: "site-1", clock_out: null },
+          error: null,
+        })
+      )
+      .mockReturnValueOnce(
+        chain({
+          data: { name: "Site One", address: "1 Main St", latitude: 40.7128, longitude: -74.006 },
+          error: null,
+        })
+      )
+      .mockReturnValueOnce(
+        chain({ data: [{ id: "photo-1", attendance_id: "att-1" }], error: null })
+      );
+
+    const res = await request(app).get("/active").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      active: true,
+      attendance: {
+        id: "att-1",
+        staff_id: "staff-1",
+        site_id: "site-1",
+        clock_out: null,
+        site: { name: "Site One", address: "1 Main St", latitude: 40.7128, longitude: -74.006 },
+        photos: [{ id: "photo-1", attendance_id: "att-1" }],
+      },
+    });
+  });
+});
+
 describe("POST /attendance/photos/before", () => {
   it("blocks requests with no token", async () => {
     const res = await request(app)
@@ -817,6 +920,189 @@ describe("PATCH /attendance/photos/:id/after", () => {
       expect.any(Buffer),
       expect.objectContaining({ contentType: "image/jpeg" })
     );
+  });
+});
+
+describe("GET /attendance/photos/signed-url", () => {
+  it("blocks requests with no token", async () => {
+    const res = await request(app).get("/photos/signed-url").query({ path: "attendance/att-1/1-photo.jpg" });
+
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual(ERRORS.AUTH_NO_TOKEN);
+  });
+
+  it("blocks an authenticated user with no recognized role", async () => {
+    const headers = asUser({ id: "no-role-user", app_metadata: {} });
+
+    const res = await request(app)
+      .get("/photos/signed-url")
+      .query({ path: "attendance/att-1/1-photo.jpg" })
+      .set(headers);
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual(ERRORS.AUTH_UNAUTHORIZED);
+  });
+
+  it("rejects a missing path query param", async () => {
+    const headers = asUser(STAFF_USER);
+
+    const res = await request(app).get("/photos/signed-url").set(headers);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual(ERRORS.VALIDATION_ERROR);
+  });
+
+  it("returns 500 when generating the signed URL fails", async () => {
+    const headers = asUser(STAFF_USER);
+    const storageFromResult = storageChain();
+    storageFromResult.createSignedUrl.mockResolvedValue({
+      data: null,
+      error: { message: "fail" },
+    });
+    supabase.storage.from.mockReturnValue(storageFromResult);
+
+    const res = await request(app)
+      .get("/photos/signed-url")
+      .query({ path: "attendance/att-1/1-photo.jpg" })
+      .set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns a signed URL for the given path", async () => {
+    const headers = asUser(STAFF_USER);
+    const storageFromResult = storageChain();
+    storageFromResult.createSignedUrl.mockResolvedValue({
+      data: { signedUrl: "https://example.supabase.co/storage/v1/object/sign/bg-photos/attendance/att-1/1-photo.jpg?token=abc" },
+      error: null,
+    });
+    supabase.storage.from.mockReturnValue(storageFromResult);
+
+    const res = await request(app)
+      .get("/photos/signed-url")
+      .query({ path: "attendance/att-1/1-photo.jpg" })
+      .set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      signed_url:
+        "https://example.supabase.co/storage/v1/object/sign/bg-photos/attendance/att-1/1-photo.jpg?token=abc",
+    });
+    expect(supabase.storage.from).toHaveBeenCalledWith("bg-photos");
+    expect(storageFromResult.createSignedUrl).toHaveBeenCalledWith(
+      "attendance/att-1/1-photo.jpg",
+      3600
+    );
+  });
+
+  it.each([
+    ["admin", ADMIN_USER],
+    ["staff", STAFF_USER],
+    ["client", CLIENT_USER],
+  ])("allows a %s user to generate a signed URL", async (_role, user) => {
+    const headers = asUser(user);
+    const storageFromResult = storageChain();
+    storageFromResult.createSignedUrl.mockResolvedValue({
+      data: { signedUrl: "https://example.supabase.co/signed/1-photo.jpg" },
+      error: null,
+    });
+    supabase.storage.from.mockReturnValue(storageFromResult);
+
+    const res = await request(app)
+      .get("/photos/signed-url")
+      .query({ path: "attendance/att-1/1-photo.jpg" })
+      .set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ signed_url: "https://example.supabase.co/signed/1-photo.jpg" });
+  });
+});
+
+describe("GET /attendance/photos/:attendance_id", () => {
+  it("blocks requests with no token", async () => {
+    const res = await request(app).get("/photos/att-1");
+
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual(ERRORS.AUTH_NO_TOKEN);
+  });
+
+  it("blocks a non-staff authenticated user", async () => {
+    const headers = asUser(ADMIN_USER);
+
+    const res = await request(app).get("/photos/att-1").set(headers);
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual(ERRORS.AUTH_UNAUTHORIZED);
+  });
+
+  it("returns 500 when fetching the attendance record fails", async () => {
+    const headers = asUser(STAFF_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).get("/photos/att-1").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns 404 when the attendance record does not exist", async () => {
+    const headers = asUser(STAFF_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: null }));
+
+    const res = await request(app).get("/photos/att-1").set(headers);
+
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toEqual(ERRORS.ATTENDANCE_NOT_FOUND);
+  });
+
+  it("returns 404 when the attendance record does not belong to the caller", async () => {
+    const headers = asUser(STAFF_USER);
+    supabase.from.mockReturnValueOnce(
+      chain({ data: { id: "att-1", staff_id: "other-staff" }, error: null })
+    );
+
+    const res = await request(app).get("/photos/att-1").set(headers);
+
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toEqual(ERRORS.ATTENDANCE_NOT_FOUND);
+  });
+
+  it("returns 500 when fetching photos fails", async () => {
+    const headers = asUser(STAFF_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "att-1", staff_id: "staff-1" }, error: null }))
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).get("/photos/att-1").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns the attendance photos", async () => {
+    const headers = asUser(STAFF_USER);
+    const photosChain = chain({
+      data: [
+        { id: "photo-1", attendance_id: "att-1", before_photo_url: "before.jpg" },
+        { id: "photo-2", attendance_id: "att-1", before_photo_url: "before2.jpg" },
+      ],
+      error: null,
+    });
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "att-1", staff_id: "staff-1" }, error: null }))
+      .mockReturnValueOnce(photosChain);
+
+    const res = await request(app).get("/photos/att-1").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      photos: [
+        { id: "photo-1", attendance_id: "att-1", before_photo_url: "before.jpg" },
+        { id: "photo-2", attendance_id: "att-1", before_photo_url: "before2.jpg" },
+      ],
+    });
+    expect(photosChain.eq).toHaveBeenCalledWith("attendance_id", "att-1");
   });
 });
 

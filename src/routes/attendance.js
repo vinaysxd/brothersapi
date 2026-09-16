@@ -399,6 +399,87 @@ router.post("/clockout", authenticate, requireRole("staff"), clockValidators, as
   return res.status(200).json({ attendance });
 });
 
+/**
+ * @swagger
+ * /attendance/active:
+ *   get:
+ *     summary: Get the current staff member's open (not yet clocked out) attendance record
+ *     tags: [Attendance]
+ *     responses:
+ *       200:
+ *         description: Whether there is an open attendance record, with site details and photos if so
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 active: { type: boolean }
+ *                 attendance: { $ref: '#/components/schemas/AttendanceWithDetails' }
+ *             examples:
+ *               active:
+ *                 value: { active: true, attendance: { id: "att-1", site: { name: "Site One" }, photos: [] } }
+ *               inactive:
+ *                 value: { active: false }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not staff
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
+router.get("/active", authenticate, requireRole("staff"), async (req, res) => {
+  const { data: attendance, error: attendanceError } = await supabase
+    .from("attendance")
+    .select("*")
+    .eq("staff_id", req.user.id)
+    .is("clock_out", null)
+    .maybeSingle();
+
+  if (attendanceError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  if (!attendance) {
+    return res.status(200).json({ active: false });
+  }
+
+  const { data: site, error: siteError } = await supabase
+    .from("sites")
+    .select("name, address, latitude, longitude")
+    .eq("id", attendance.site_id)
+    .maybeSingle();
+
+  if (siteError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  const { data: photos, error: photosError } = await supabase
+    .from("attendance_photos")
+    .select("*")
+    .eq("attendance_id", attendance.id);
+
+  if (photosError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  return res.status(200).json({
+    active: true,
+    attendance: { ...attendance, site: site ?? null, photos },
+  });
+});
+
 const validateBeforePhoto = [
   body("attendance_id").isString().trim().notEmpty().withMessage("attendance_id is required"),
   body("label").isString().trim().notEmpty().withMessage("label is required"),
@@ -661,6 +742,150 @@ router.patch(
     return res.status(200).json({ photo });
   }
 );
+
+/**
+ * @swagger
+ * /attendance/photos/signed-url:
+ *   get:
+ *     summary: Generate a short-lived signed URL for a stored attendance photo
+ *     tags: [Attendance]
+ *     parameters:
+ *       - in: query
+ *         name: path
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Signed URL generated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 signed_url: { type: string }
+ *       400:
+ *         description: Missing path query parameter
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "VAL_001", message: "Validation error" }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not an admin, staff, or client
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
+router.get(
+  "/photos/signed-url",
+  authenticate,
+  requireRole("admin", "staff", "client"),
+  async (req, res) => {
+    const { path } = req.query;
+
+    if (!path || typeof path !== "string") {
+      return res.status(400).json(ERRORS.VALIDATION_ERROR);
+    }
+
+    console.log("[GET /attendance/photos/signed-url] bucket:", PHOTO_BUCKET);
+    console.log("[GET /attendance/photos/signed-url] path:", path);
+
+    const { data, error } = await supabase.storage.from(PHOTO_BUCKET).createSignedUrl(path, 3600);
+
+    if (error) {
+      console.log("[GET /attendance/photos/signed-url] createSignedUrl error:", error);
+      return res.status(500).json(ERRORS.SERVER_ERROR);
+    }
+
+    return res.status(200).json({ signed_url: data.signedUrl });
+  }
+);
+
+/**
+ * @swagger
+ * /attendance/photos/{attendance_id}:
+ *   get:
+ *     summary: Get all before/after photos for one of the current staff member's attendance records
+ *     tags: [Attendance]
+ *     parameters:
+ *       - in: path
+ *         name: attendance_id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Attendance photos
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 photos:
+ *                   type: array
+ *                   items: { $ref: '#/components/schemas/AttendancePhoto' }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not staff
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Attendance record not found or does not belong to the caller
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "ATT_005", message: "Attendance record not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
+router.get("/photos/:attendance_id", authenticate, requireRole("staff"), async (req, res) => {
+  const { data: attendance, error: attendanceError } = await supabase
+    .from("attendance")
+    .select("id, staff_id")
+    .eq("id", req.params.attendance_id)
+    .maybeSingle();
+
+  if (attendanceError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  if (!attendance || attendance.staff_id !== req.user.id) {
+    return res.status(404).json(ERRORS.ATTENDANCE_NOT_FOUND);
+  }
+
+  const { data: photos, error: photosError } = await supabase
+    .from("attendance_photos")
+    .select("*")
+    .eq("attendance_id", req.params.attendance_id);
+
+  if (photosError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  return res.status(200).json({ photos });
+});
 
 /**
  * @swagger

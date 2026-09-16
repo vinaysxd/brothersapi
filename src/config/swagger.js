@@ -109,6 +109,29 @@ const options = {
             },
           ],
         },
+        SiteWithStaff: {
+          allOf: [
+            { $ref: "#/components/schemas/Site" },
+            {
+              type: "object",
+              properties: {
+                staff: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      id: { type: "string", format: "uuid" },
+                      full_name: { type: "string" },
+                      phone: { type: "string" },
+                      avatar_url: { type: "string", nullable: true },
+                      is_active: { type: "boolean" },
+                    },
+                  },
+                },
+              },
+            },
+          ],
+        },
         Attendance: {
           type: "object",
           properties: {

@@ -259,7 +259,7 @@ router.post("/refresh", refreshValidators, async (req, res) => {
  */
 router.post("/logout", authenticate, async (req, res) => {
   const { error } = await supabase.auth.admin.signOut(req.user.id);
-
+  console.log("LOGOUT = ",error)
   if (error) {
     return res.status(500).json(ERRORS.SERVER_ERROR);
   }

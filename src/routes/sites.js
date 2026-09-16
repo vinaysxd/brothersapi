@@ -18,11 +18,11 @@ const pick = (source, fields) => {
 };
 
 const findClient = async (clientId) => {
-  console.log("[findClient] querying client_profile where profile_id =", clientId);
+  console.log("[findClient] querying client_profile where id =", clientId);
   const result = await supabase
     .from("client_profile")
     .select("id")
-    .eq("profile_id", clientId)
+    .eq("id", clientId)
     .maybeSingle();
   console.log("[findClient] result:", result.data, "error:", result.error);
   return result;
@@ -54,6 +54,77 @@ const findSiteClientDetails = async (clientId) => {
   }
 
   return { client: { ...profile, ...clientProfile } };
+};
+
+const findSiteStaff = async (siteId) => {
+  const { data: siteStaffRows, error: siteStaffError } = await supabase
+    .from("site_staff")
+    .select("profile_id")
+    .eq("site_id", siteId);
+
+  if (siteStaffError) {
+    return { error: siteStaffError };
+  }
+
+  const profileIds = [...new Set(siteStaffRows.map((row) => row.profile_id))];
+
+  if (profileIds.length === 0) {
+    return { staff: [] };
+  }
+
+  const { data: profiles, error: profilesError } = await supabase
+    .from("profiles")
+    .select("id, full_name, phone, avatar_url, is_active")
+    .in("id", profileIds);
+
+  if (profilesError) {
+    return { error: profilesError };
+  }
+
+  return { staff: profiles };
+};
+
+const attachClients = async (sites) => {
+  const clientIds = [...new Set(sites.map((site) => site.client_id))];
+
+  if (clientIds.length === 0) {
+    return { clientsById: {} };
+  }
+
+  const { data: clientProfiles, error: clientProfilesError } = await supabase
+    .from("client_profile")
+    .select("id, profile_id, company_name, billing_address, contact_person")
+    .in("id", clientIds);
+
+  if (clientProfilesError) {
+    return { error: clientProfilesError };
+  }
+
+  const profileIds = [...new Set(clientProfiles.map((clientProfile) => clientProfile.profile_id))];
+
+  let profileById = {};
+
+  if (profileIds.length > 0) {
+    const { data: profiles, error: profilesError } = await supabase
+      .from("profiles")
+      .select("id, full_name, email, phone")
+      .in("id", profileIds);
+
+    if (profilesError) {
+      return { error: profilesError };
+    }
+
+    profileById = Object.fromEntries(profiles.map((profile) => [profile.id, profile]));
+  }
+
+  const clientsById = Object.fromEntries(
+    clientProfiles.map((clientProfile) => [
+      clientProfile.id,
+      { ...profileById[clientProfile.profile_id], ...clientProfile },
+    ])
+  );
+
+  return { clientsById };
 };
 
 const siteValidators = [
@@ -118,7 +189,7 @@ const assignStaffValidators = [
  *               address: { type: string }
  *               latitude: { type: number, format: float, minimum: -90, maximum: 90 }
  *               longitude: { type: number, format: float, minimum: -180, maximum: 180 }
- *               client_id: { type: string, format: uuid, description: "profiles.id of the client" }
+ *               client_id: { type: string, format: uuid, description: "client_profile.id" }
  *     responses:
  *       201:
  *         description: Site created
@@ -236,43 +307,10 @@ router.get("/", authenticate, requireRole("admin"), async (req, res) => {
     return res.status(500).json(ERRORS.SERVER_ERROR);
   }
 
-  const clientIds = [...new Set(sites.map((site) => site.client_id))];
+  const { clientsById, error: clientsError } = await attachClients(sites);
 
-  let clientsById = {};
-
-  if (clientIds.length > 0) {
-    const { data: clientProfiles, error: clientProfilesError } = await supabase
-      .from("client_profile")
-      .select("id, profile_id, company_name, billing_address, contact_person")
-      .in("id", clientIds);
-
-    if (clientProfilesError) {
-      return res.status(500).json(ERRORS.SERVER_ERROR);
-    }
-
-    const profileIds = [...new Set(clientProfiles.map((clientProfile) => clientProfile.profile_id))];
-
-    let profileById = {};
-
-    if (profileIds.length > 0) {
-      const { data: profiles, error: profilesError } = await supabase
-        .from("profiles")
-        .select("id, full_name, email, phone")
-        .in("id", profileIds);
-
-      if (profilesError) {
-        return res.status(500).json(ERRORS.SERVER_ERROR);
-      }
-
-      profileById = Object.fromEntries(profiles.map((profile) => [profile.id, profile]));
-    }
-
-    clientsById = Object.fromEntries(
-      clientProfiles.map((clientProfile) => [
-        clientProfile.id,
-        { ...profileById[clientProfile.profile_id], ...clientProfile },
-      ])
-    );
+  if (clientsError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
   }
 
   const sitesWithClient = sites.map((site) => ({
@@ -345,7 +383,18 @@ router.get("/my-sites", authenticate, requireRole("staff"), async (req, res) => 
     return res.status(500).json(ERRORS.SERVER_ERROR);
   }
 
-  return res.status(200).json({ sites });
+  const { clientsById, error: clientsError } = await attachClients(sites);
+
+  if (clientsError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  const sitesWithClient = sites.map((site) => ({
+    ...site,
+    client: clientsById[site.client_id] ?? null,
+  }));
+
+  return res.status(200).json({ sites: sitesWithClient });
 });
 
 /**
@@ -423,7 +472,13 @@ router.get("/my-sites/:id", authenticate, requireRole("staff"), async (req, res)
     return res.status(404).json(ERRORS.SITE_NOT_FOUND);
   }
 
-  return res.status(200).json({ site });
+  const { client, error: clientDetailsError } = await findSiteClientDetails(site.client_id);
+
+  if (clientDetailsError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  return res.status(200).json({ site: { ...site, client } });
 });
 
 /**
@@ -515,7 +570,7 @@ router.get("/client-sites", authenticate, requireRole("client"), async (req, res
  *             schema:
  *               type: object
  *               properties:
- *                 site: { $ref: '#/components/schemas/Site' }
+ *                 site: { $ref: '#/components/schemas/SiteWithStaff' }
  *       401:
  *         description: No token provided or invalid token
  *         content:
@@ -575,7 +630,13 @@ router.get("/client-sites/:id", authenticate, requireRole("client"), async (req,
     return res.status(404).json(ERRORS.SITE_NOT_FOUND);
   }
 
-  return res.status(200).json({ site });
+  const { staff, error: staffError } = await findSiteStaff(site.id);
+
+  if (staffError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  return res.status(200).json({ site: { ...site, staff } });
 });
 
 /**
@@ -757,7 +818,7 @@ router.get("/:id/staff", authenticate, requireRole("admin"), async (req, res) =>
  *               address: { type: string }
  *               latitude: { type: number, format: float, minimum: -90, maximum: 90 }
  *               longitude: { type: number, format: float, minimum: -180, maximum: 180 }
- *               client_id: { type: string, format: uuid, description: "profiles.id of the client" }
+ *               client_id: { type: string, format: uuid, description: "client_profile.id" }
  *     responses:
  *       200:
  *         description: Site updated
