@@ -98,17 +98,21 @@ router.get("/me", authenticate, async (req, res) => {
   let signed_avatar_url = null;
 
   if (profile.avatar_url) {
-    const { data: signedUrlData, error: signedUrlError } = await supabase.storage
-      .from(AVATAR_BUCKET)
-      .createSignedUrl(profile.avatar_url, 3600);
-    console.log("signedUrlError",profile.avatar_url,signedUrlError)
-    if (signedUrlError) {
-      return res.status(500).json(ERRORS.SERVER_ERROR);
-    }
+    try {
+      const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+        .from(AVATAR_BUCKET)
+        .createSignedUrl(profile.avatar_url, 3600);
 
-    signed_avatar_url = signedUrlData?.signedUrl ?? null;
+      if (signedUrlError) {
+        console.error("[GET /profile/me] createSignedUrl failed:", signedUrlError);
+      } else {
+        signed_avatar_url = signedUrlData?.signedUrl ?? null;
+      }
+    } catch (err) {
+      console.error("[GET /profile/me] createSignedUrl threw:", err);
+    }
   }
-  console.log("=============",profile)
+
   return res.status(200).json({ ...profile, ...roleProfile, signed_avatar_url });
 });
 

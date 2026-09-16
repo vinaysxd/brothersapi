@@ -224,7 +224,7 @@ describe("GET /profile/me", () => {
     );
   });
 
-  it("returns 500 when generating the signed avatar url fails", async () => {
+  it("returns the profile with a null signed_avatar_url when generating the signed url fails", async () => {
     const headers = asUser(ADMIN_USER);
     supabase.from.mockReturnValueOnce(
       chain({
@@ -238,8 +238,38 @@ describe("GET /profile/me", () => {
 
     const res = await request(app).get("/me").set(headers);
 
-    expect(res.statusCode).toBe(500);
-    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      id: "admin-1",
+      full_name: "Admin One",
+      role: "admin",
+      avatar_url: "avatars/admin-1/photo.jpg",
+      signed_avatar_url: null,
+    });
+  });
+
+  it("returns the profile with a null signed_avatar_url when createSignedUrl throws", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(
+      chain({
+        data: { id: "admin-1", full_name: "Admin One", role: "admin", avatar_url: "avatars/admin-1/photo.jpg" },
+        error: null,
+      })
+    );
+    supabase.storage.from.mockReturnValue({
+      createSignedUrl: jest.fn().mockRejectedValue(new Error("storage unavailable")),
+    });
+
+    const res = await request(app).get("/me").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      id: "admin-1",
+      full_name: "Admin One",
+      role: "admin",
+      avatar_url: "avatars/admin-1/photo.jpg",
+      signed_avatar_url: null,
+    });
   });
 });
 
