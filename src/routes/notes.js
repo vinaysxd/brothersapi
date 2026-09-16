@@ -490,4 +490,90 @@ router.get("/:site_id/client-view", authenticate, requireRole("client"), async (
   return res.status(200).json({ notes });
 });
 
+/**
+ * @swagger
+ * /notes/{site_id}/{note_id}:
+ *   delete:
+ *     summary: Delete a site note
+ *     tags: [Notes]
+ *     parameters:
+ *       - in: path
+ *         name: site_id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *       - in: path
+ *         name: note_id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Note deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message: { type: string, example: "Note deleted successfully" }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not authorized to delete this note
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Note not found
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "NTE_001", message: "Note not found" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
+router.delete("/:site_id/:note_id", authenticate, async (req, res) => {
+  const { note_id } = req.params;
+
+  const { data: note, error: noteError } = await supabase
+    .from("site_notes")
+    .select("*")
+    .eq("id", note_id)
+    .maybeSingle();
+
+  if (noteError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  if (!note) {
+    return res.status(404).json(ERRORS.SITE_NOTE_NOT_FOUND);
+  }
+
+  const role = req.user.app_metadata?.role;
+
+  const isAuthorized =
+    role === "admin" ||
+    (role === "staff" && note.type === "staff" && note.author_id === req.user.id) ||
+    (role === "client" && note.type === "client" && note.author_id === req.user.id);
+
+  if (!isAuthorized) {
+    return res.status(403).json(ERRORS.AUTH_UNAUTHORIZED);
+  }
+
+  const { error: deleteError } = await supabase.from("site_notes").delete().eq("id", note_id);
+
+  if (deleteError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  return res.status(200).json({ message: "Note deleted successfully" });
+});
+
 export default router;

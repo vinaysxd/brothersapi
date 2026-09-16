@@ -27,7 +27,7 @@ process.on("unhandledRejection", (reason) => {
 }); 
 const app = express();
 app.use(helmet());
-app.use(cors({origin: [process.env.ALLOWED_ORIGIN, "http://localhost:8081", "http://localhost:19006","https://e1d7-139-168-211-5.ngrok-free.app","http://172.20.10.6"]}))
+app.use(cors({origin: [process.env.ALLOWED_ORIGIN, "http://localhost:8081", "http://localhost:19006","https://e1d7-139-168-211-5.ngrok-free.app","http://172.20.10.6","http://192.168.0.81:8081"]}))
 app.use(rateLimit({windowMs: 15*60*1000, max: 100}));
 
 app.use(morgan("dev"));

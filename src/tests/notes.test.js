@@ -33,6 +33,7 @@ const chain = (result) => {
   const builder = {};
   builder.select = jest.fn(() => builder);
   builder.insert = jest.fn(() => builder);
+  builder.delete = jest.fn(() => builder);
   builder.eq = jest.fn(() => builder);
   builder.in = jest.fn(() => builder);
   builder.order = jest.fn(() => builder);
@@ -633,5 +634,152 @@ describe("GET /notes/:site_id/client-view", () => {
         },
       ],
     });
+  });
+});
+
+describe("DELETE /notes/:site_id/:note_id", () => {
+  it("blocks requests with no token", async () => {
+    const res = await request(app).delete("/site-1/note-1");
+
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual(ERRORS.AUTH_NO_TOKEN);
+  });
+
+  it("returns 500 when fetching the note fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).delete("/site-1/note-1").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns 404 when the note does not exist", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: null }));
+
+    const res = await request(app).delete("/site-1/note-1").set(headers);
+
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toEqual(ERRORS.SITE_NOTE_NOT_FOUND);
+  });
+
+  it("allows an admin to delete any note", async () => {
+    const headers = asUser(ADMIN_USER);
+    const deleteChain = chain({ data: null, error: null });
+    supabase.from
+      .mockReturnValueOnce(
+        chain({
+          data: { id: "note-1", author_id: "staff-1", site_id: "site-1", type: "staff" },
+          error: null,
+        })
+      )
+      .mockReturnValueOnce(deleteChain);
+
+    const res = await request(app).delete("/site-1/note-1").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ message: "Note deleted successfully" });
+    expect(deleteChain.delete).toHaveBeenCalled();
+    expect(deleteChain.eq).toHaveBeenCalledWith("id", "note-1");
+  });
+
+  it("allows staff to delete their own staff note", async () => {
+    const headers = asUser(STAFF_USER);
+    const deleteChain = chain({ data: null, error: null });
+    supabase.from
+      .mockReturnValueOnce(
+        chain({
+          data: { id: "note-1", author_id: "staff-1", site_id: "site-1", type: "staff" },
+          error: null,
+        })
+      )
+      .mockReturnValueOnce(deleteChain);
+
+    const res = await request(app).delete("/site-1/note-1").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ message: "Note deleted successfully" });
+  });
+
+  it("blocks staff from deleting another staff member's note", async () => {
+    const headers = asUser(STAFF_USER);
+    supabase.from.mockReturnValueOnce(
+      chain({
+        data: { id: "note-1", author_id: "staff-2", site_id: "site-1", type: "staff" },
+        error: null,
+      })
+    );
+
+    const res = await request(app).delete("/site-1/note-1").set(headers);
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual(ERRORS.AUTH_UNAUTHORIZED);
+  });
+
+  it("blocks staff from deleting a client note even if it is their own author id", async () => {
+    const headers = asUser(STAFF_USER);
+    supabase.from.mockReturnValueOnce(
+      chain({
+        data: { id: "note-1", author_id: "staff-1", site_id: "site-1", type: "client" },
+        error: null,
+      })
+    );
+
+    const res = await request(app).delete("/site-1/note-1").set(headers);
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual(ERRORS.AUTH_UNAUTHORIZED);
+  });
+
+  it("allows a client to delete their own client note", async () => {
+    const headers = asUser(CLIENT_USER);
+    const deleteChain = chain({ data: null, error: null });
+    supabase.from
+      .mockReturnValueOnce(
+        chain({
+          data: { id: "note-1", author_id: "client-user-1", site_id: "site-1", type: "client" },
+          error: null,
+        })
+      )
+      .mockReturnValueOnce(deleteChain);
+
+    const res = await request(app).delete("/site-1/note-1").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ message: "Note deleted successfully" });
+  });
+
+  it("blocks a client from deleting another client's note", async () => {
+    const headers = asUser(CLIENT_USER);
+    supabase.from.mockReturnValueOnce(
+      chain({
+        data: { id: "note-1", author_id: "other-client", site_id: "site-1", type: "client" },
+        error: null,
+      })
+    );
+
+    const res = await request(app).delete("/site-1/note-1").set(headers);
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual(ERRORS.AUTH_UNAUTHORIZED);
+  });
+
+  it("returns 500 when deleting the note fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(
+        chain({
+          data: { id: "note-1", author_id: "staff-1", site_id: "site-1", type: "staff" },
+          error: null,
+        })
+      )
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).delete("/site-1/note-1").set(headers);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
   });
 });
