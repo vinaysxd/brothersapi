@@ -14,6 +14,7 @@ import profileRoutes from "./routes/profile.js";
 import sitesRoutes from "./routes/sites.js";
 import attendanceRoutes from "./routes/attendance.js";
 import notesRoutes from "./routes/notes.js";
+import integrationsRoutes from "./routes/integrations.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 
 process.on("uncaughtException", (err) => {
@@ -26,6 +27,7 @@ process.on("unhandledRejection", (reason) => {
   process.exit(1);
 }); 
 const app = express();
+app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors({origin: [process.env.ALLOWED_ORIGIN, "http://localhost:8081", "http://localhost:19006","https://e1d7-139-168-211-5.ngrok-free.app","http://172.20.10.6","http://192.168.0.81:8081"]}))
 app.use(rateLimit({windowMs: 15*60*1000, max: 100}));
@@ -48,6 +50,7 @@ app.use("/profile", profileRoutes);
 app.use("/sites", sitesRoutes);
 app.use("/attendance", attendanceRoutes);
 app.use("/notes", notesRoutes);
+app.use("/integrations", integrationsRoutes);
 
 app.get("/api-docs.json", (req, res) => {
   res.json(swaggerSpec);
