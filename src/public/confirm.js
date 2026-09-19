@@ -1,5 +1,5 @@
 // TODO: adjust to your actual login page.
-const LOGIN_REDIRECT_URL = "http://localhost:3000/auth/login";
+const LOGIN_REDIRECT_URL = "http://localhost:8081/auth/login";
 const REDIRECT_DELAY_MS = 2000;
 
 const form = document.getElementById("password-form");

@@ -1,5 +1,5 @@
+import https from "node:https";
 import OAuthClient from "intuit-oauth";
-import QuickBooks from "node-quickbooks";
 
 const { QB_CLIENT_ID, QB_CLIENT_SECRET, QB_REDIRECT_URI, QB_ENVIRONMENT } = process.env;
 
@@ -55,49 +55,75 @@ export const refreshAccessToken = async (refresh_token) => {
   };
 };
 
-const getQboClient = (access_token, realm_id) =>
-  new QuickBooks(
-    QB_CLIENT_ID,
-    QB_CLIENT_SECRET,
-    access_token,
-    false,
-    realm_id,
-    isSandbox,
-    false,
-    null,
-    "2.0",
-    null
-  );
+const escapeQboString = (value) => String(value).replace(/'/g, "\\'");
 
-export const getInvoices = (access_token, realm_id, qb_customer_id) => {
-  const qbo = getQboClient(access_token, realm_id);
+const qboRequest = (access_token, path, useSandbox = isSandbox) => {
+  const hostname = useSandbox
+    ? "sandbox-quickbooks.api.intuit.com"
+    : "quickbooks.api.intuit.com";
+
+  const options = {
+    hostname,
+    path,
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${access_token}`,
+      Accept: "application/json",
+    },
+  };
 
   return new Promise((resolve, reject) => {
-    qbo.findInvoices([{ field: "CustomerRef", value: qb_customer_id }], (err, data) => {
-      if (err) return reject(err);
-      resolve(data.QueryResponse?.Invoice ?? []);
+    const req = https.request(options, (res) => {
+      let body = "";
+
+      res.on("data", (chunk) => {
+        body += chunk;
+      });
+
+      res.on("end", () => {
+        let json;
+
+        try {
+          json = JSON.parse(body);
+        } catch (err) {
+          return reject(err);
+        }
+
+        if (res.statusCode < 200 || res.statusCode >= 300 || json.Fault) {
+          return reject(json);
+        }
+
+        resolve(json);
+      });
     });
+
+    req.on("error", reject);
+    req.end();
   });
 };
 
-export const getInvoiceById = (access_token, realm_id, qb_invoice_id) => {
-  const qbo = getQboClient(access_token, realm_id);
+export const getInvoices = async (access_token, realm_id, qb_customer_id, useSandbox = isSandbox) => {
+  const query = `select * from Invoice where CustomerRef = '${escapeQboString(qb_customer_id)}' orderby TxnDate desc maxresults 10`;
+  const path = `/v3/company/${realm_id}/query?query=${encodeURIComponent(query)}&minorversion=65`;
 
-  return new Promise((resolve, reject) => {
-    qbo.getInvoice(qb_invoice_id, (err, data) => {
-      if (err) return reject(err);
-      resolve(data);
-    });
-  });
+  const data = await qboRequest(access_token, path, useSandbox);
+
+  return data.QueryResponse?.Invoice ?? [];
 };
 
-export const getPayments = (access_token, realm_id, qb_customer_id) => {
-  const qbo = getQboClient(access_token, realm_id);
+export const getInvoiceById = async (access_token, realm_id, qb_invoice_id, useSandbox = isSandbox) => {
+  const path = `/v3/company/${realm_id}/invoice/${qb_invoice_id}?minorversion=65`;
 
-  return new Promise((resolve, reject) => {
-    qbo.findPayments([{ field: "CustomerRef", value: qb_customer_id }], (err, data) => {
-      if (err) return reject(err);
-      resolve(data.QueryResponse?.Payment ?? []);
-    });
-  });
+  const data = await qboRequest(access_token, path, useSandbox);
+
+  return data.Invoice ?? null;
+};
+
+export const getPayments = async (access_token, realm_id, qb_customer_id, useSandbox = isSandbox) => {
+  const query = `select * from Payment where CustomerRef = '${escapeQboString(qb_customer_id)}'`;
+  const path = `/v3/company/${realm_id}/query?query=${encodeURIComponent(query)}&minorversion=65`;
+
+  const data = await qboRequest(access_token, path, useSandbox);
+
+  return data.QueryResponse?.Payment ?? [];
 };

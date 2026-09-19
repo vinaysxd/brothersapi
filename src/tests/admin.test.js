@@ -44,6 +44,21 @@ const mockInsert = (error = null) =>
     insert: jest.fn().mockResolvedValue({ error }),
   });
 
+const buildProfilesBuilder = ({
+  existingProfile = null,
+  existingProfileError = null,
+  upsertError = null,
+} = {}) => {
+  const upsertMock = jest.fn().mockResolvedValue({ error: upsertError });
+  const builder = {
+    select: jest.fn(() => builder),
+    eq: jest.fn(() => builder),
+    maybeSingle: jest.fn(() => Promise.resolve({ data: existingProfile, error: existingProfileError })),
+    upsert: upsertMock,
+  };
+  return { builder, upsertMock };
+};
+
 const chain = (result) => {
   const builder = {};
   builder.select = jest.fn(() => builder);
@@ -173,7 +188,8 @@ describe("POST /invite", () => {
       data: { user: { id: "new-user-1" } },
       error: null,
     });
-    supabase.from.mockImplementation(mockInsert({ message: "insert failed" }));
+    const { builder } = buildProfilesBuilder({ upsertError: { message: "upsert failed" } });
+    supabase.from.mockImplementation((table) => (table === "profiles" ? builder : mockInsert()()));
 
     const res = await request(app)
       .post("/invite")
@@ -185,6 +201,27 @@ describe("POST /invite", () => {
     expect(supabase.from).toHaveBeenCalledWith("profiles");
   });
 
+  it("returns 500 when checking for an existing profile fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.auth.admin.inviteUserByEmail.mockResolvedValue({
+      data: { user: { id: "new-user-1" } },
+      error: null,
+    });
+    const { builder, upsertMock } = buildProfilesBuilder({
+      existingProfileError: { message: "select failed" },
+    });
+    supabase.from.mockImplementation((table) => (table === "profiles" ? builder : mockInsert()()));
+
+    const res = await request(app)
+      .post("/invite")
+      .set(headers)
+      .send(validBody);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+    expect(upsertMock).not.toHaveBeenCalled();
+  });
+
   it("creates a staff user: profiles + staff_profile", async () => {
     const headers = asUser(ADMIN_USER);
     supabase.auth.admin.inviteUserByEmail.mockResolvedValue({
@@ -192,8 +229,11 @@ describe("POST /invite", () => {
       error: null,
     });
 
+    const { builder: profilesBuilder, upsertMock } = buildProfilesBuilder();
     const insertMock = jest.fn().mockResolvedValue({ error: null });
-    supabase.from.mockReturnValue({ insert: insertMock });
+    supabase.from.mockImplementation((table) =>
+      table === "profiles" ? profilesBuilder : { insert: insertMock }
+    );
 
     const res = await request(app)
       .post("/invite")
@@ -215,7 +255,8 @@ describe("POST /invite", () => {
     expect(supabase.from).toHaveBeenCalledWith("profiles");
     expect(supabase.from).toHaveBeenCalledWith("staff_profile");
     expect(supabase.from).not.toHaveBeenCalledWith("client_profile");
-    expect(insertMock).toHaveBeenCalledWith({
+    expect(profilesBuilder.eq).toHaveBeenCalledWith("id", "new-staff-1");
+    expect(upsertMock).toHaveBeenCalledWith({
       id: "new-staff-1",
       email: validBody.email,
       full_name: validBody.full_name,
@@ -223,7 +264,10 @@ describe("POST /invite", () => {
       role: "staff",
       is_active: false,
     });
-    expect(insertMock).toHaveBeenCalledWith({ profile_id: "new-staff-1" });
+    expect(insertMock).toHaveBeenCalledWith({
+      profile_id: "new-staff-1",
+      employee_id: expect.stringMatching(/^EMP-[0-9A-F]{8}$/),
+    });
   });
 
   it("returns 500 when setting app_metadata role fails", async () => {
@@ -253,8 +297,11 @@ describe("POST /invite", () => {
       error: null,
     });
 
+    const { builder: profilesBuilder, upsertMock } = buildProfilesBuilder();
     const insertMock = jest.fn().mockResolvedValue({ error: null });
-    supabase.from.mockReturnValue({ insert: insertMock });
+    supabase.from.mockImplementation((table) =>
+      table === "profiles" ? profilesBuilder : { insert: insertMock }
+    );
 
     const res = await request(app)
       .post("/invite")
@@ -266,7 +313,7 @@ describe("POST /invite", () => {
     expect(supabase.from).toHaveBeenCalledWith("profiles");
     expect(supabase.from).toHaveBeenCalledWith("client_profile");
     expect(supabase.from).not.toHaveBeenCalledWith("staff_profile");
-    expect(insertMock).toHaveBeenCalledWith({
+    expect(upsertMock).toHaveBeenCalledWith({
       id: "new-client-1",
       email: validBody.email,
       full_name: validBody.full_name,
@@ -284,11 +331,11 @@ describe("POST /invite", () => {
       error: null,
     });
 
-    const insertMock = jest
-      .fn()
-      .mockResolvedValueOnce({ error: null }) // profiles insert succeeds
-      .mockResolvedValueOnce({ error: { message: "insert failed" } }); // staff_profile insert fails
-    supabase.from.mockReturnValue({ insert: insertMock });
+    const { builder: profilesBuilder } = buildProfilesBuilder();
+    const insertMock = jest.fn().mockResolvedValue({ error: { message: "insert failed" } }); // staff_profile insert fails
+    supabase.from.mockImplementation((table) =>
+      table === "profiles" ? profilesBuilder : { insert: insertMock }
+    );
 
     const res = await request(app)
       .post("/invite")
@@ -297,6 +344,37 @@ describe("POST /invite", () => {
 
     expect(res.statusCode).toBe(500);
     expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("upserts instead of throwing a duplicate key error when a profiles row already exists", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.auth.admin.inviteUserByEmail.mockResolvedValue({
+      data: { user: { id: "existing-user-1" } },
+      error: null,
+    });
+
+    const { builder: profilesBuilder, upsertMock } = buildProfilesBuilder({
+      existingProfile: { id: "existing-user-1" },
+    });
+    const insertMock = jest.fn().mockResolvedValue({ error: null });
+    supabase.from.mockImplementation((table) =>
+      table === "profiles" ? profilesBuilder : { insert: insertMock }
+    );
+
+    const res = await request(app)
+      .post("/invite")
+      .set(headers)
+      .send({ ...validBody, role: "client" });
+
+    expect(res.statusCode).toBe(201);
+    expect(upsertMock).toHaveBeenCalledWith({
+      id: "existing-user-1",
+      email: validBody.email,
+      full_name: validBody.full_name,
+      phone: validBody.phone,
+      role: "client",
+      is_active: false,
+    });
   });
 });
 

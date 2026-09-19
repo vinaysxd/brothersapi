@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import { body, validationResult } from "express-validator";
 import { supabase } from "../config/supabase.js";
@@ -103,7 +104,7 @@ router.post(
     }
 
     const { email, role, full_name, phone } = req.body;
-
+  console.log("+============================>",full_name, email, phone, role)
     const { data: inviteData, error: inviteError } =
       await supabase.auth.admin.inviteUserByEmail(email);
 
@@ -124,7 +125,21 @@ router.post(
       return res.status(500).json(ERRORS.SERVER_ERROR);
     }
 
-    const { error: profileError } = await supabase.from("profiles").insert({
+    const { data: existingProfile, error: existingProfileError } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (existingProfileError) {
+      return res.status(500).json(ERRORS.SERVER_ERROR);
+    }
+
+    if (existingProfile) {
+      console.log("Profile already exists for user, upserting:", userId);
+    }
+
+    const { error: profileError } = await supabase.from("profiles").upsert({
       id: userId,
       email,
       full_name,
@@ -132,17 +147,25 @@ router.post(
       role,
       is_active: false,
     });
-
+  console.log("========>",profileError)
     if (profileError) {
       return res.status(500).json(ERRORS.SERVER_ERROR);
     }
 
     if (role === "staff") {
+      const employee_id = `EMP-${randomUUID().split("-")[0].toUpperCase()}`;
+      const staffProfileInsert = { profile_id: userId, employee_id };
+
+      console.log("staff_profile insert query:", staffProfileInsert);
+
       const { error: staffError } = await supabase
         .from("staff_profile")
-        .insert({ profile_id: userId });
+        .insert(staffProfileInsert);
+
+      console.log("staff_profile insert result:", { error: staffError });
 
       if (staffError) {
+        console.error("Failed to insert staff_profile:", staffError);
         return res.status(500).json(ERRORS.SERVER_ERROR);
       }
     }

@@ -20,7 +20,6 @@ export const qbAuth = async (req, res, next) => {
 
       access_token = refreshed.access_token;
       refresh_token = refreshed.refresh_token;
-      realm_id = refreshed.realm_id;
 
       const token_expiry_new = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
