@@ -42,8 +42,8 @@ router.get("/quickbooks/connect", (req, res) => {
  *     summary: Handle the QuickBooks OAuth callback and exchange the auth code for tokens
  *     tags: [Integrations]
  *     responses:
- *       200:
- *         description: Tokens exchanged successfully
+ *       302:
+ *         description: Tokens exchanged successfully; redirects to the app deep link (brothers://integrations/quickbooks)
  *       500:
  *         description: Token exchange failed
  */
@@ -51,8 +51,6 @@ router.get("/quickbooks/callback", async (req, res) => {
   try {
     const fullUrl = `${req.protocol}://${req.get("host")}${req.originalUrl}`;
     const { access_token, refresh_token, realm_id } = await exchangeCodeForTokens(fullUrl);
-
-    console.log("QuickBooks tokens received:", { access_token, refresh_token, realm_id });
 
     const token_expiry = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
@@ -73,7 +71,8 @@ router.get("/quickbooks/callback", async (req, res) => {
       return res.status(500).json({ code: "QBO_001", message: "QuickBooks token exchange failed" });
     }
 
-    return res.status(200).json({ message: "QuickBooks connected successfully" });
+    // Deep link back into the app so the in-app auth browser session closes itself.
+    return res.redirect("brothers://integrations/quickbooks");
   } catch (error) {
     console.error("QuickBooks token exchange failed:", error);
     return res.status(500).json({ code: "QBO_001", message: "QuickBooks token exchange failed" });
