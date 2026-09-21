@@ -44,6 +44,7 @@ const chain = (result) => {
   builder.lt = jest.fn(() => builder);
   builder.order = jest.fn(() => builder);
   builder.limit = jest.fn(() => builder);
+  builder.range = jest.fn(() => builder);
   builder.single = jest.fn(() => Promise.resolve(result));
   builder.maybeSingle = jest.fn(() => Promise.resolve(result));
   builder.then = (resolve) => resolve(result);
@@ -1140,7 +1141,7 @@ describe("GET /attendance/my-history", () => {
     const res = await request(app).get("/my-history").set(headers);
 
     expect(res.statusCode).toBe(200);
-    expect(res.body).toEqual({ attendance: [] });
+    expect(res.body).toEqual({ attendance: [], total: 0, page: 1, limit: 10, totalPages: 0 });
     expect(supabase.from).toHaveBeenCalledTimes(1);
   });
 
@@ -1175,6 +1176,7 @@ describe("GET /attendance/my-history", () => {
       .mockReturnValueOnce(
         chain({
           data: [{ id: "att-1", staff_id: "staff-1", site_id: "site-1", clock_in: "2026-08-31T09:00:00.000Z" }],
+          count: 25,
           error: null,
         })
       )
@@ -1197,7 +1199,37 @@ describe("GET /attendance/my-history", () => {
           photos: [{ id: "photo-1", attendance_id: "att-1", label: "Entrance" }],
         },
       ],
+      total: 25,
+      page: 1,
+      limit: 10,
+      totalPages: 3,
     });
+  });
+
+  it("applies page and limit query params to the range and reports totalPages", async () => {
+    const headers = asUser(STAFF_USER);
+    const attendanceChain = chain({ data: [], count: 45, error: null });
+    supabase.from.mockReturnValueOnce(attendanceChain);
+
+    const res = await request(app).get("/my-history?page=3&limit=20").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(attendanceChain.select).toHaveBeenCalledWith("*", { count: "exact" });
+    expect(attendanceChain.order).toHaveBeenCalledWith("clock_in", { ascending: false });
+    expect(attendanceChain.range).toHaveBeenCalledWith(40, 59);
+    expect(res.body).toEqual({ attendance: [], total: 45, page: 3, limit: 20, totalPages: 3 });
+  });
+
+  it("defaults to page 1 and limit 10 when the query params are invalid", async () => {
+    const headers = asUser(STAFF_USER);
+    const attendanceChain = chain({ data: [], count: 0, error: null });
+    supabase.from.mockReturnValueOnce(attendanceChain);
+
+    const res = await request(app).get("/my-history?page=abc&limit=-5").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(attendanceChain.range).toHaveBeenCalledWith(0, 9);
+    expect(res.body).toMatchObject({ page: 1, limit: 10 });
   });
 });
 
@@ -1235,7 +1267,7 @@ describe("GET /attendance/site/:site_id", () => {
     const res = await request(app).get("/site/site-1").set(headers);
 
     expect(res.statusCode).toBe(200);
-    expect(res.body).toEqual({ attendance: [] });
+    expect(res.body).toEqual({ attendance: [], total: 0, page: 1, limit: 10, totalPages: 0 });
     expect(supabase.from).toHaveBeenCalledTimes(1);
   });
 
@@ -1270,6 +1302,7 @@ describe("GET /attendance/site/:site_id", () => {
       .mockReturnValueOnce(
         chain({
           data: [{ id: "att-1", staff_id: "staff-1", site_id: "site-1", clock_in: "2026-08-31T09:00:00.000Z" }],
+          count: 11,
           error: null,
         })
       )
@@ -1290,7 +1323,25 @@ describe("GET /attendance/site/:site_id", () => {
           photos: [],
         },
       ],
+      total: 11,
+      page: 1,
+      limit: 10,
+      totalPages: 2,
     });
+  });
+
+  it("applies page and limit query params to the range and reports totalPages", async () => {
+    const headers = asUser(ADMIN_USER);
+    const attendanceChain = chain({ data: [], count: 45, error: null });
+    supabase.from.mockReturnValueOnce(attendanceChain);
+
+    const res = await request(app).get("/site/site-1?page=2&limit=5").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(attendanceChain.select).toHaveBeenCalledWith("*", { count: "exact" });
+    expect(attendanceChain.eq).toHaveBeenCalledWith("site_id", "site-1");
+    expect(attendanceChain.range).toHaveBeenCalledWith(5, 9);
+    expect(res.body).toEqual({ attendance: [], total: 45, page: 2, limit: 5, totalPages: 9 });
   });
 });
 
@@ -1328,7 +1379,7 @@ describe("GET /attendance/recent", () => {
     const res = await request(app).get("/recent").set(headers);
 
     expect(res.statusCode).toBe(200);
-    expect(res.body).toEqual({ attendance: [] });
+    expect(res.body).toEqual({ attendance: [], total: 0, page: 1, limit: 10, totalPages: 0 });
     expect(supabase.from).toHaveBeenCalledTimes(1);
   });
 
@@ -1388,6 +1439,7 @@ describe("GET /attendance/recent", () => {
           clock_in: "2026-08-31T09:00:00.000Z",
         },
       ],
+      count: 1,
       error: null,
     });
     supabase.from
@@ -1425,9 +1477,14 @@ describe("GET /attendance/recent", () => {
           photos: [{ id: "photo-1", attendance_id: "att-1" }],
         },
       ],
+      total: 1,
+      page: 1,
+      limit: 10,
+      totalPages: 1,
     });
+    expect(attendanceChain.select).toHaveBeenCalledWith("*", { count: "exact" });
     expect(attendanceChain.order).toHaveBeenCalledWith("clock_in", { ascending: false });
-    expect(attendanceChain.limit).toHaveBeenCalledWith(10);
+    expect(attendanceChain.range).toHaveBeenCalledWith(0, 9);
   });
 
   it("uses the limit query param when provided", async () => {
@@ -1438,7 +1495,19 @@ describe("GET /attendance/recent", () => {
     const res = await request(app).get("/recent?limit=5").set(headers);
 
     expect(res.statusCode).toBe(200);
-    expect(attendanceChain.limit).toHaveBeenCalledWith(5);
+    expect(attendanceChain.range).toHaveBeenCalledWith(0, 4);
+  });
+
+  it("supports the page query param and reports totalPages", async () => {
+    const headers = asUser(ADMIN_USER);
+    const attendanceChain = chain({ data: [], count: 23, error: null });
+    supabase.from.mockReturnValueOnce(attendanceChain);
+
+    const res = await request(app).get("/recent?page=3&limit=10").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(attendanceChain.range).toHaveBeenCalledWith(20, 29);
+    expect(res.body).toEqual({ attendance: [], total: 23, page: 3, limit: 10, totalPages: 3 });
   });
 
   it("caps the limit query param at 50", async () => {
@@ -1449,7 +1518,7 @@ describe("GET /attendance/recent", () => {
     const res = await request(app).get("/recent?limit=500").set(headers);
 
     expect(res.statusCode).toBe(200);
-    expect(attendanceChain.limit).toHaveBeenCalledWith(50);
+    expect(attendanceChain.range).toHaveBeenCalledWith(0, 49);
   });
 
   it("falls back to the default limit when the query param is invalid", async () => {
@@ -1460,7 +1529,7 @@ describe("GET /attendance/recent", () => {
     const res = await request(app).get("/recent?limit=not-a-number").set(headers);
 
     expect(res.statusCode).toBe(200);
-    expect(attendanceChain.limit).toHaveBeenCalledWith(10);
+    expect(attendanceChain.range).toHaveBeenCalledWith(0, 9);
   });
 });
 
@@ -1522,7 +1591,7 @@ describe("GET /attendance/client-history", () => {
     const res = await request(app).get("/client-history").set(headers);
 
     expect(res.statusCode).toBe(200);
-    expect(res.body).toEqual({ attendance: [] });
+    expect(res.body).toEqual({ attendance: [], total: 0, page: 1, limit: 10, totalPages: 0 });
     expect(supabase.from).toHaveBeenCalledTimes(2);
   });
 
@@ -1576,6 +1645,7 @@ describe("GET /attendance/client-history", () => {
       .mockReturnValueOnce(
         chain({
           data: [{ id: "att-1", staff_id: "staff-1", site_id: "site-1", clock_in: "2026-08-31T09:00:00.000Z" }],
+          count: 1,
           error: null,
         })
       )
@@ -1598,6 +1668,26 @@ describe("GET /attendance/client-history", () => {
           photos: [{ id: "photo-1", attendance_id: "att-1", label: "Entrance" }],
         },
       ],
+      total: 1,
+      page: 1,
+      limit: 10,
+      totalPages: 1,
     });
+  });
+
+  it("applies page and limit query params to the range and reports totalPages", async () => {
+    const headers = asUser(CLIENT_USER);
+    const attendanceChain = chain({ data: [], count: 12, error: null });
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "cp-1" }, error: null }))
+      .mockReturnValueOnce(chain({ data: [{ id: "site-1" }], error: null }))
+      .mockReturnValueOnce(attendanceChain);
+
+    const res = await request(app).get("/client-history?page=2&limit=5").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(attendanceChain.select).toHaveBeenCalledWith("*", { count: "exact" });
+    expect(attendanceChain.range).toHaveBeenCalledWith(5, 9);
+    expect(res.body).toEqual({ attendance: [], total: 12, page: 2, limit: 5, totalPages: 3 });
   });
 });

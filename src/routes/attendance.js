@@ -887,6 +887,29 @@ router.get("/photos/:attendance_id", authenticate, requireRole("staff"), async (
   return res.status(200).json({ photos });
 });
 
+const DEFAULT_PAGE_LIMIT = 10;
+const MAX_PAGE_LIMIT = 100;
+
+const parsePagination = (query, maxLimit = MAX_PAGE_LIMIT) => {
+  const parsedPage = parseInt(query.page, 10);
+  const parsedLimit = parseInt(query.limit, 10);
+  const page = parsedPage >= 1 ? parsedPage : 1;
+  const limit = parsedLimit >= 1 ? Math.min(parsedLimit, maxLimit) : DEFAULT_PAGE_LIMIT;
+  const from = (page - 1) * limit;
+  return { page, limit, from, to: from + limit - 1 };
+};
+
+const attendanceResponse = (attendance, pagination, count) => {
+  const total = count ?? 0;
+  return {
+    attendance,
+    total,
+    page: pagination.page,
+    limit: pagination.limit,
+    totalPages: Math.ceil(total / pagination.limit),
+  };
+};
+
 /**
  * @swagger
  * /attendance/my-history:
@@ -924,11 +947,17 @@ router.get("/photos/:attendance_id", authenticate, requireRole("staff"), async (
  *             example: { code: "SRV_001", message: "Internal server error" }
  */
 router.get("/my-history", authenticate, requireRole("staff"), async (req, res) => {
-  const { data: attendanceRows, error: attendanceError } = await supabase
+  const pagination = parsePagination(req.query);
+
+  let historyQuery = supabase
     .from("attendance")
-    .select("*")
+    .select("*", { count: "exact" })
     .eq("staff_id", req.user.id)
     .order("clock_in", { ascending: false });
+  if (req.query.site_id) historyQuery = historyQuery.eq("site_id", req.query.site_id);
+  historyQuery = historyQuery.range(pagination.from, pagination.to);
+
+  const { data: attendanceRows, count, error: attendanceError } = await historyQuery;
 
   if (attendanceError) {
     return res.status(500).json(ERRORS.SERVER_ERROR);
@@ -952,7 +981,7 @@ router.get("/my-history", authenticate, requireRole("staff"), async (req, res) =
     photos: photosByAttendanceId[row.id] ?? [],
   }));
 
-  return res.status(200).json({ attendance });
+  return res.status(200).json(attendanceResponse(attendance, pagination, count));
 });
 
 /**
@@ -997,11 +1026,16 @@ router.get("/my-history", authenticate, requireRole("staff"), async (req, res) =
  *             example: { code: "SRV_001", message: "Internal server error" }
  */
 router.get("/site/:site_id", authenticate, requireRole("admin"), async (req, res) => {
-  const { data: attendanceRows, error: attendanceError } = await supabase
+  const pagination = parsePagination(req.query);
+
+  let siteQuery = supabase
     .from("attendance")
-    .select("*")
+    .select("*", { count: "exact" })
     .eq("site_id", req.params.site_id)
     .order("clock_in", { ascending: false });
+  siteQuery = siteQuery.range(pagination.from, pagination.to);
+
+  const { data: attendanceRows, count, error: attendanceError } = await siteQuery;
 
   if (attendanceError) {
     return res.status(500).json(ERRORS.SERVER_ERROR);
@@ -1025,10 +1059,9 @@ router.get("/site/:site_id", authenticate, requireRole("admin"), async (req, res
     photos: photosByAttendanceId[row.id] ?? [],
   }));
 
-  return res.status(200).json({ attendance });
+  return res.status(200).json(attendanceResponse(attendance, pagination, count));
 });
 
-const DEFAULT_RECENT_LIMIT = 10;
 const MAX_RECENT_LIMIT = 50;
 
 /**
@@ -1073,17 +1106,13 @@ const MAX_RECENT_LIMIT = 50;
  *             example: { code: "SRV_001", message: "Internal server error" }
  */
 router.get("/recent", authenticate, requireRole("admin"), async (req, res) => {
-  const requestedLimit = parseInt(req.query.limit, 10);
-  const limit =
-    Number.isFinite(requestedLimit) && requestedLimit > 0
-      ? Math.min(requestedLimit, MAX_RECENT_LIMIT)
-      : DEFAULT_RECENT_LIMIT;
+  const pagination = parsePagination(req.query, MAX_RECENT_LIMIT);
 
-  const { data: attendanceRows, error: attendanceError } = await supabase
+  const { data: attendanceRows, count, error: attendanceError } = await supabase
     .from("attendance")
-    .select("*")
+    .select("*", { count: "exact" })
     .order("clock_in", { ascending: false })
-    .limit(limit);
+    .range(pagination.from, pagination.to);
 
   if (attendanceError) {
     return res.status(500).json(ERRORS.SERVER_ERROR);
@@ -1114,7 +1143,7 @@ router.get("/recent", authenticate, requireRole("admin"), async (req, res) => {
     photos: photosByAttendanceId[row.id] ?? [],
   }));
 
-  return res.status(200).json({ attendance });
+  return res.status(200).json(attendanceResponse(attendance, pagination, count));
 });
 
 /**
@@ -1160,6 +1189,8 @@ router.get("/recent", authenticate, requireRole("admin"), async (req, res) => {
  *             example: { code: "SRV_001", message: "Internal server error" }
  */
 router.get("/client-history", authenticate, requireRole("client"), async (req, res) => {
+  const pagination = parsePagination(req.query);
+
   const { data: clientProfile, error: clientProfileError } = await supabase
     .from("client_profile")
     .select("id")
@@ -1186,14 +1217,18 @@ router.get("/client-history", authenticate, requireRole("client"), async (req, r
   const siteIds = sites.map((site) => site.id);
 
   if (siteIds.length === 0) {
-    return res.status(200).json({ attendance: [] });
+    return res.status(200).json(attendanceResponse([], pagination, 0));
   }
 
-  const { data: attendanceRows, error: attendanceError } = await supabase
+  let clientQuery = supabase
     .from("attendance")
-    .select("*")
+    .select("*", { count: "exact" })
     .in("site_id", siteIds)
     .order("clock_in", { ascending: false });
+  if (req.query.site_id) clientQuery = clientQuery.eq("site_id", req.query.site_id);
+  clientQuery = clientQuery.range(pagination.from, pagination.to);
+
+  const { data: attendanceRows, count, error: attendanceError } = await clientQuery;
 
   if (attendanceError) {
     return res.status(500).json(ERRORS.SERVER_ERROR);
@@ -1217,7 +1252,7 @@ router.get("/client-history", authenticate, requireRole("client"), async (req, r
     photos: photosByAttendanceId[row.id] ?? [],
   }));
 
-  return res.status(200).json({ attendance });
+  return res.status(200).json(attendanceResponse(attendance, pagination, count));
 });
 
 export default router;
