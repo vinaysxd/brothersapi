@@ -30,6 +30,11 @@ export const ERRORS = {
   // Site Notes
   SITE_NOTE_NOT_FOUND: { code: "NTE_001", message: "Note not found" },
 
+  // Site Tasks
+  TASK_NOT_FOUND: { code: "TSK_001", message: "Task not found" },
+  TASK_ALREADY_EXISTS: { code: "TSK_002", message: "Task already exists for this site" },
+  TASK_INVALID_LABEL: { code: "TSK_003", message: "Label must be from the site's predefined task list" },
+
   // General
   SERVER_ERROR: { code: "SRV_001", message: "Internal server error" },
   NOT_FOUND: { code: "SRV_002", message: "Resource not found" },

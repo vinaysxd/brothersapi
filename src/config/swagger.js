@@ -204,6 +204,16 @@ const options = {
             },
           ],
         },
+        Task: {
+          type: "object",
+          properties: {
+            id: { type: "string", format: "uuid" },
+            site_id: { type: "string", format: "uuid" },
+            label: { type: "string" },
+            created_by: { type: "string", format: "uuid" },
+            created_at: { type: "string", format: "date-time" },
+          },
+        },
       },
     },
     security: [{ bearerAuth: [] }],

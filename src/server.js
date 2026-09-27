@@ -14,6 +14,7 @@ import profileRoutes from "./routes/profile.js";
 import sitesRoutes from "./routes/sites.js";
 import attendanceRoutes from "./routes/attendance.js";
 import notesRoutes from "./routes/notes.js";
+import taskRoutes from "./routes/tasks.js";
 import integrationsRoutes from "./routes/integrations.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 
@@ -62,6 +63,7 @@ app.use("/profile", profileRoutes);
 app.use("/sites", sitesRoutes);
 app.use("/attendance", attendanceRoutes);
 app.use("/notes", notesRoutes);
+app.use("/tasks", taskRoutes);
 app.use("/integrations", integrationsRoutes);
 
 app.get("/api-docs.json", (req, res) => {

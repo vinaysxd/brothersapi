@@ -652,11 +652,100 @@ describe("POST /attendance/photos/before", () => {
     expect(supabase.from).toHaveBeenCalledTimes(1);
   });
 
+  it("returns 500 when fetching the site tasks fails", async () => {
+    const headers = asUser(STAFF_USER);
+    supabase.from
+      .mockReturnValueOnce(
+        chain({
+          data: { id: "att-1", staff_id: "staff-1", site_id: "site-1", clock_out: null },
+          error: null,
+        })
+      )
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app)
+      .post("/photos/before")
+      .set(headers)
+      .field("attendance_id", "att-1")
+      .field("label", "Entrance")
+      .attach("photo", Buffer.from("fake-image"), "photo.jpg");
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("returns 400 when the label is not in the site's task list", async () => {
+    const headers = asUser(STAFF_USER);
+    supabase.from
+      .mockReturnValueOnce(
+        chain({
+          data: { id: "att-1", staff_id: "staff-1", site_id: "site-1", clock_out: null },
+          error: null,
+        })
+      )
+      .mockReturnValueOnce(
+        chain({ data: [{ label: "Kitchen" }, { label: "Lobby" }], error: null })
+      );
+
+    const res = await request(app)
+      .post("/photos/before")
+      .set(headers)
+      .field("attendance_id", "att-1")
+      .field("label", "Entrance")
+      .attach("photo", Buffer.from("fake-image"), "photo.jpg");
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual(ERRORS.TASK_INVALID_LABEL);
+  });
+
+  it("allows any label when the site has no predefined tasks", async () => {
+    const headers = asUser(STAFF_USER);
+    const insertChain = chain({
+      data: {
+        id: "photo-1",
+        attendance_id: "att-1",
+        label: "Entrance",
+        before_photo_url: "attendance/att-1/1234567890-photo.jpg",
+      },
+      error: null,
+    });
+    supabase.from
+      .mockReturnValueOnce(
+        chain({
+          data: { id: "att-1", staff_id: "staff-1", site_id: "site-1", clock_out: null },
+          error: null,
+        })
+      )
+      .mockReturnValueOnce(chain({ data: [], error: null }))
+      .mockReturnValueOnce(insertChain);
+    supabase.storage.from.mockReturnValue(storageChain({ error: null }));
+
+    const res = await request(app)
+      .post("/photos/before")
+      .set(headers)
+      .field("attendance_id", "att-1")
+      .field("label", "Entrance")
+      .attach("photo", Buffer.from("fake-image"), "photo.jpg");
+
+    expect(res.statusCode).toBe(201);
+    expect(res.body.photo).toEqual({
+      id: "photo-1",
+      attendance_id: "att-1",
+      label: "Entrance",
+      before_photo_url: "attendance/att-1/1234567890-photo.jpg",
+    });
+  });
+
   it("returns 500 when the upload fails", async () => {
     const headers = asUser(STAFF_USER);
-    supabase.from.mockReturnValueOnce(
-      chain({ data: { id: "att-1", staff_id: "staff-1", clock_out: null }, error: null })
-    );
+    supabase.from
+      .mockReturnValueOnce(
+        chain({
+          data: { id: "att-1", staff_id: "staff-1", site_id: "site-1", clock_out: null },
+          error: null,
+        })
+      )
+      .mockReturnValueOnce(chain({ data: [], error: null }));
     supabase.storage.from.mockReturnValue(
       storageChain({ error: { message: "upload failed" } })
     );
@@ -676,8 +765,12 @@ describe("POST /attendance/photos/before", () => {
     const headers = asUser(STAFF_USER);
     supabase.from
       .mockReturnValueOnce(
-        chain({ data: { id: "att-1", staff_id: "staff-1", clock_out: null }, error: null })
+        chain({
+          data: { id: "att-1", staff_id: "staff-1", site_id: "site-1", clock_out: null },
+          error: null,
+        })
       )
+      .mockReturnValueOnce(chain({ data: [], error: null }))
       .mockReturnValueOnce(chain({ data: null, error: { message: "insert failed" } }));
     supabase.storage.from.mockReturnValue(storageChain({ error: null }));
 
@@ -705,8 +798,12 @@ describe("POST /attendance/photos/before", () => {
     });
     supabase.from
       .mockReturnValueOnce(
-        chain({ data: { id: "att-1", staff_id: "staff-1", clock_out: null }, error: null })
+        chain({
+          data: { id: "att-1", staff_id: "staff-1", site_id: "site-1", clock_out: null },
+          error: null,
+        })
       )
+      .mockReturnValueOnce(chain({ data: [], error: null }))
       .mockReturnValueOnce(insertChain);
     const storageFromResult = storageChain({ error: null });
     supabase.storage.from.mockReturnValue(storageFromResult);

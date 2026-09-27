@@ -630,7 +630,7 @@ const handleBeforePhoto = async (req, res) => {
   console.log("[before-photo] fetching attendance with query: .from('attendance').select('id, staff_id, clock_out').eq('id',", attendance_id, ").maybeSingle()");
   const { data: attendance, error: attendanceError } = await supabase
     .from("attendance")
-    .select("id, staff_id, clock_out")
+    .select("id, staff_id, site_id, clock_out")
     .eq("id", attendance_id)
     .maybeSingle();
 
@@ -652,6 +652,21 @@ const handleBeforePhoto = async (req, res) => {
   if (attendance.clock_out !== null) {
     console.log("[before-photo] 400 from handleBeforePhoto: attendance already clocked out at", attendance.clock_out);
     return res.status(400).json(ERRORS.ATTENDANCE_ALREADY_CLOSED);
+  }
+
+  const { data: siteTasks, error: siteTasksError } = await supabase
+    .from("site_tasks")
+    .select("label")
+    .eq("site_id", attendance.site_id);
+
+  if (siteTasksError) {
+    console.log("[before-photo] 500 from handleBeforePhoto: siteTasksError", siteTasksError);
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  if (siteTasks.length > 0 && !siteTasks.some((task) => task.label === label)) {
+    console.log("[before-photo] 400 from handleBeforePhoto: label not in site task list", label);
+    return res.status(400).json(ERRORS.TASK_INVALID_LABEL);
   }
 
   const { path, error: uploadError } = await uploadPhoto(req.file, `attendance/${attendance_id}`);
@@ -702,7 +717,7 @@ const handleBeforePhoto = async (req, res) => {
  *               properties:
  *                 photo: { $ref: '#/components/schemas/AttendancePhoto' }
  *       400:
- *         description: Validation error, missing file, or attendance already clocked out
+ *         description: Validation error, missing file, attendance already clocked out, or label not in the site's task list
  *         content:
  *           application/json:
  *             schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -711,6 +726,8 @@ const handleBeforePhoto = async (req, res) => {
  *                 value: { code: "VAL_001", message: "Validation error" }
  *               alreadyClosed:
  *                 value: { code: "ATT_008", message: "Attendance is already clocked out" }
+ *               invalidLabel:
+ *                 value: { code: "TSK_003", message: "Label must be from the site's predefined task list" }
  *       401:
  *         description: No token provided or invalid token
  *         content:
