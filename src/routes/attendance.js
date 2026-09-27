@@ -401,6 +401,128 @@ router.post("/clockout", authenticate, requireRole("staff"), clockValidators, as
 
 /**
  * @swagger
+ * /attendance/force-clockout:
+ *   post:
+ *     summary: Clock out of a site without the 100 metre geolocation check
+ *     tags: [Attendance]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [site_id, latitude, longitude]
+ *             properties:
+ *               site_id: { type: string, format: uuid }
+ *               latitude: { type: number, format: float, minimum: -90, maximum: 90 }
+ *               longitude: { type: number, format: float, minimum: -180, maximum: 180 }
+ *     responses:
+ *       200:
+ *         description: Clocked out successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 attendance: { $ref: '#/components/schemas/Attendance' }
+ *       400:
+ *         description: Validation error, or before/after photos incomplete
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             examples:
+ *               validation:
+ *                 value: { code: "VAL_001", message: "Validation error" }
+ *               photoPairRequired:
+ *                 value: { code: "ATT_004", message: "Before and after photos are required" }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not staff
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       404:
+ *         description: Not currently clocked in at this site
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "ATT_003", message: "Not clocked in" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
+router.post(
+  "/force-clockout",
+  authenticate,
+  requireRole("staff"),
+  clockValidators,
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json(ERRORS.VALIDATION_ERROR);
+    }
+
+    const { site_id, latitude, longitude } = req.body;
+
+    const { data: openAttendance, error: openAttendanceError } = await supabase
+      .from("attendance")
+      .select("id")
+      .eq("staff_id", req.user.id)
+      .eq("site_id", site_id)
+      .is("clock_out", null)
+      .maybeSingle();
+
+    if (openAttendanceError) {
+      return res.status(500).json(ERRORS.SERVER_ERROR);
+    }
+
+    if (!openAttendance) {
+      return res.status(404).json(ERRORS.ATTENDANCE_NOT_CLOCKED_IN);
+    }
+
+    const { data: photos, error: photosError } = await supabase
+      .from("attendance_photos")
+      .select("after_photo_url")
+      .eq("attendance_id", openAttendance.id);
+
+    if (photosError) {
+      return res.status(500).json(ERRORS.SERVER_ERROR);
+    }
+
+    if (photos.some((photo) => !photo.after_photo_url)) {
+      return res.status(400).json(ERRORS.ATTENDANCE_PHOTO_PAIR_REQUIRED);
+    }
+
+    const { data: attendance, error: updateError } = await supabase
+      .from("attendance")
+      .update({
+        clock_out: new Date().toISOString(),
+        clock_out_lat: latitude,
+        clock_out_lng: longitude,
+      })
+      .eq("id", openAttendance.id)
+      .select()
+      .single();
+
+    if (updateError) {
+      return res.status(500).json(ERRORS.SERVER_ERROR);
+    }
+
+    return res.status(200).json({ attendance });
+  }
+);
+
+/**
+ * @swagger
  * /attendance/active:
  *   get:
  *     summary: Get the current staff member's open (not yet clocked out) attendance record
@@ -485,40 +607,57 @@ const validateBeforePhoto = [
   body("label").isString().trim().notEmpty().withMessage("label is required"),
   (req, res, next) => {
     const errors = validationResult(req);
-    if (!errors.isEmpty() || !req.file) {
-      console.log(errors.array());
+    console.log("[before-photo] req.body:", req.body);
+    console.log("[before-photo] req.file:", req.file);
+    if (!errors.isEmpty()) {
+      console.log("[before-photo] 400 from validateBeforePhoto: express-validator errors:", errors.array());
       return res.status(400).json(ERRORS.VALIDATION_ERROR);
     }
+    if (!req.file) {
+      console.log("[before-photo] 400 from validateBeforePhoto: req.file is undefined (multer did not attach a file)");
+      return res.status(400).json(ERRORS.VALIDATION_ERROR);
+    }
+    console.log("[before-photo] Validation passed, req.body:", req.body);
+    console.log("[before-photo] req.file:", req.file);
     next();
   },
 ];
 
 const handleBeforePhoto = async (req, res) => {
   const { attendance_id, label } = req.body;
+  console.log("[before-photo] handleBeforePhoto attendance_id:", attendance_id, "label:", label);
 
+  console.log("[before-photo] fetching attendance with query: .from('attendance').select('id, staff_id, clock_out').eq('id',", attendance_id, ").maybeSingle()");
   const { data: attendance, error: attendanceError } = await supabase
     .from("attendance")
     .select("id, staff_id, clock_out")
     .eq("id", attendance_id)
     .maybeSingle();
 
-  console.log("attendance record:", attendance);
+  console.log("[before-photo] attendance record:", attendance, "attendanceError:", attendanceError);
 
   if (attendanceError) {
+    console.log("[before-photo] 500 from handleBeforePhoto: attendanceError", attendanceError);
     return res.status(500).json(ERRORS.SERVER_ERROR);
   }
 
   if (!attendance || attendance.staff_id !== req.user.id) {
+    console.log(
+      "[before-photo] 404 from handleBeforePhoto: attendance not found or staff_id mismatch. req.user.id:",
+      req.user.id
+    );
     return res.status(404).json(ERRORS.ATTENDANCE_NOT_FOUND);
   }
 
   if (attendance.clock_out !== null) {
+    console.log("[before-photo] 400 from handleBeforePhoto: attendance already clocked out at", attendance.clock_out);
     return res.status(400).json(ERRORS.ATTENDANCE_ALREADY_CLOSED);
   }
 
   const { path, error: uploadError } = await uploadPhoto(req.file, `attendance/${attendance_id}`);
 
   if (uploadError) {
+    console.log("[before-photo] 500 from handleBeforePhoto: uploadError", uploadError);
     return res.status(500).json(ERRORS.SERVER_ERROR);
   }
 
@@ -527,8 +666,9 @@ const handleBeforePhoto = async (req, res) => {
     .insert({ attendance_id, label, before_photo_url: path })
     .select()
     .single();
-console.log("Insert errro ",insertError)
+  console.log("[before-photo] insert error:", insertError);
   if (insertError) {
+    console.log("[before-photo] 500 from handleBeforePhoto: insertError", insertError);
     return res.status(500).json(ERRORS.SERVER_ERROR);
   }
 
@@ -799,6 +939,12 @@ router.get(
       return res.status(400).json(ERRORS.VALIDATION_ERROR);
     }
 
+    console.log(
+      "[GET /attendance/photos/signed-url] caller role:",
+      req.user?.app_metadata?.role,
+      "id:",
+      req.user?.id
+    );
     console.log("[GET /attendance/photos/signed-url] bucket:", PHOTO_BUCKET);
     console.log("[GET /attendance/photos/signed-url] path:", path);
 
@@ -809,6 +955,7 @@ router.get(
       return res.status(500).json(ERRORS.SERVER_ERROR);
     }
 
+    console.log("[GET /attendance/photos/signed-url] signed URL generated:", data.signedUrl);
     return res.status(200).json({ signed_url: data.signedUrl });
   }
 );
