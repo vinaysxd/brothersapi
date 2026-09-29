@@ -312,7 +312,25 @@ router.put("/me", authenticate, profileUpdateValidators, async (req, res) => {
  *             example: { code: "SRV_001", message: "Internal server error" }
  */
 router.post("/avatar", authenticate, avatarUpload.single("avatar"), async (req, res) => {
+  const errors = validationResult(req);
+  console.log("Validation errors:", errors.array());
+  console.log("req.file:", req.file);
+  console.log("req.body:", req.body);
+
+  if (!errors.isEmpty()) {
+    console.log(
+      "[POST /profile/avatar] 400 from validationResult:",
+      errors.array().map((e) => e.msg)
+    );
+    return res.status(400).json(ERRORS.VALIDATION_ERROR);
+  }
+
   if (!req.file) {
+    console.log(
+      "[POST /profile/avatar] 400: req.file is undefined - multer expects the field name 'avatar' " +
+        "(avatarUpload.single(\"avatar\")); a request sending 'photo' or 'image' instead will leave req.file unset " +
+        "(or, depending on multer config, throw a MulterError 'Unexpected field' that gets forwarded to the generic error handler as a 500)"
+    );
     return res.status(400).json(ERRORS.VALIDATION_ERROR);
   }
 
@@ -323,6 +341,7 @@ router.post("/avatar", authenticate, avatarUpload.single("avatar"), async (req, 
     .upload(filePath, req.file.buffer, { contentType: req.file.mimetype });
 
   if (uploadError) {
+    console.log("[POST /profile/avatar] 500 from storage upload:", uploadError);
     return res.status(500).json(ERRORS.SERVER_ERROR);
   }
 
