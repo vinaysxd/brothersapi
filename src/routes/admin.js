@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import { body, validationResult } from "express-validator";
 import { supabase } from "../config/supabase.js";
@@ -153,7 +152,28 @@ router.post(
     }
 
     if (role === "staff") {
-      const employee_id = `EMP-${randomUUID().split("-")[0].toUpperCase()}`;
+      const { data: lastStaff, error: lastStaffError } = await supabase
+        .from("staff_profile")
+        .select("employee_id")
+        .not("employee_id", "is", null)
+        .order("employee_id", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (lastStaffError) {
+        console.error("Failed to fetch last staff_profile:", lastStaffError);
+        return res.status(500).json(ERRORS.SERVER_ERROR);
+      }
+
+      const lastNumber = lastStaff?.employee_id
+        ? parseInt(lastStaff.employee_id.replace("EMP-", ""), 10) || 0
+        : 0;
+      const nextNumber = lastNumber + 1;
+      const employee_id = `EMP-${String(nextNumber).padStart(5, "0")}`;
+
+      console.log("Last staff employee_id:", lastStaff?.employee_id);
+      console.log("Generated employee_id:", employee_id);
+
       const staffProfileInsert = { profile_id: userId, employee_id };
 
       console.log("staff_profile insert query:", staffProfileInsert);

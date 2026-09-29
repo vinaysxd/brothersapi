@@ -59,6 +59,23 @@ const buildProfilesBuilder = ({
   return { builder, upsertMock };
 };
 
+const buildStaffProfileBuilder = ({
+  lastStaff = null,
+  lastStaffError = null,
+  insertError = null,
+} = {}) => {
+  const insertMock = jest.fn().mockResolvedValue({ error: insertError });
+  const builder = {
+    select: jest.fn(() => builder),
+    not: jest.fn(() => builder),
+    order: jest.fn(() => builder),
+    limit: jest.fn(() => builder),
+    maybeSingle: jest.fn(() => Promise.resolve({ data: lastStaff, error: lastStaffError })),
+    insert: insertMock,
+  };
+  return { builder, insertMock };
+};
+
 const chain = (result) => {
   const builder = {};
   builder.select = jest.fn(() => builder);
@@ -222,7 +239,7 @@ describe("POST /invite", () => {
     expect(upsertMock).not.toHaveBeenCalled();
   });
 
-  it("creates a staff user: profiles + staff_profile", async () => {
+  it("creates a staff user: profiles + staff_profile with the first sequential employee_id", async () => {
     const headers = asUser(ADMIN_USER);
     supabase.auth.admin.inviteUserByEmail.mockResolvedValue({
       data: { user: { id: "new-staff-1" } },
@@ -230,10 +247,14 @@ describe("POST /invite", () => {
     });
 
     const { builder: profilesBuilder, upsertMock } = buildProfilesBuilder();
-    const insertMock = jest.fn().mockResolvedValue({ error: null });
-    supabase.from.mockImplementation((table) =>
-      table === "profiles" ? profilesBuilder : { insert: insertMock }
-    );
+    const { builder: staffProfileBuilder, insertMock } = buildStaffProfileBuilder({
+      lastStaff: null,
+    });
+    supabase.from.mockImplementation((table) => {
+      if (table === "profiles") return profilesBuilder;
+      if (table === "staff_profile") return staffProfileBuilder;
+      return { insert: jest.fn().mockResolvedValue({ error: null }) };
+    });
 
     const res = await request(app)
       .post("/invite")
@@ -264,10 +285,69 @@ describe("POST /invite", () => {
       role: "staff",
       is_active: false,
     });
+    expect(staffProfileBuilder.not).toHaveBeenCalledWith("employee_id", "is", null);
+    expect(staffProfileBuilder.order).toHaveBeenCalledWith("employee_id", { ascending: false });
+    expect(staffProfileBuilder.limit).toHaveBeenCalledWith(1);
     expect(insertMock).toHaveBeenCalledWith({
       profile_id: "new-staff-1",
-      employee_id: expect.stringMatching(/^EMP-[0-9A-F]{8}$/),
+      employee_id: "EMP-00001",
     });
+  });
+
+  it("generates the next sequential employee_id based on the latest one", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.auth.admin.inviteUserByEmail.mockResolvedValue({
+      data: { user: { id: "new-staff-4" } },
+      error: null,
+    });
+
+    const { builder: profilesBuilder } = buildProfilesBuilder();
+    const { builder: staffProfileBuilder, insertMock } = buildStaffProfileBuilder({
+      lastStaff: { employee_id: "EMP-00007" },
+    });
+    supabase.from.mockImplementation((table) => {
+      if (table === "profiles") return profilesBuilder;
+      if (table === "staff_profile") return staffProfileBuilder;
+      return { insert: jest.fn().mockResolvedValue({ error: null }) };
+    });
+
+    const res = await request(app)
+      .post("/invite")
+      .set(headers)
+      .send({ ...validBody, role: "staff" });
+
+    expect(res.statusCode).toBe(201);
+    expect(insertMock).toHaveBeenCalledWith({
+      profile_id: "new-staff-4",
+      employee_id: "EMP-00008",
+    });
+  });
+
+  it("returns 500 when fetching the last staff_profile fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.auth.admin.inviteUserByEmail.mockResolvedValue({
+      data: { user: { id: "new-staff-5" } },
+      error: null,
+    });
+
+    const { builder: profilesBuilder } = buildProfilesBuilder();
+    const { builder: staffProfileBuilder, insertMock } = buildStaffProfileBuilder({
+      lastStaffError: { message: "fetch failed" },
+    });
+    supabase.from.mockImplementation((table) => {
+      if (table === "profiles") return profilesBuilder;
+      if (table === "staff_profile") return staffProfileBuilder;
+      return { insert: jest.fn().mockResolvedValue({ error: null }) };
+    });
+
+    const res = await request(app)
+      .post("/invite")
+      .set(headers)
+      .send({ ...validBody, role: "staff" });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+    expect(insertMock).not.toHaveBeenCalled();
   });
 
   it("returns 500 when setting app_metadata role fails", async () => {
@@ -332,10 +412,14 @@ describe("POST /invite", () => {
     });
 
     const { builder: profilesBuilder } = buildProfilesBuilder();
-    const insertMock = jest.fn().mockResolvedValue({ error: { message: "insert failed" } }); // staff_profile insert fails
-    supabase.from.mockImplementation((table) =>
-      table === "profiles" ? profilesBuilder : { insert: insertMock }
-    );
+    const { builder: staffProfileBuilder } = buildStaffProfileBuilder({
+      insertError: { message: "insert failed" },
+    });
+    supabase.from.mockImplementation((table) => {
+      if (table === "profiles") return profilesBuilder;
+      if (table === "staff_profile") return staffProfileBuilder;
+      return { insert: jest.fn().mockResolvedValue({ error: null }) };
+    });
 
     const res = await request(app)
       .post("/invite")
