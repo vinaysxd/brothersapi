@@ -314,7 +314,7 @@ router.post("/forgot-password", forgotPasswordValidators, async (req, res) => {
   if (!errors.isEmpty()) {
     return res.status(400).json(ERRORS.VALIDATION_ERROR);
   }
-
+console.log("ERROR = ")
   const { email } = req.body;
 
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
@@ -322,6 +322,7 @@ router.post("/forgot-password", forgotPasswordValidators, async (req, res) => {
   });
 
   if (error) {
+    console.log("ERROR = ",error)
     return res.status(500).json(ERRORS.SERVER_ERROR);
   }
 
