@@ -34,7 +34,7 @@ app.use(helmet());
 app.use(cors({
   origin: [
     "https://webapp.brothersgroup.au",
-    "https://ui-tau-puce.vercel.app/",
+    "https://ui-tau-puce.vercel.app",
     process.env.ALLOWED_ORIGIN
   ].filter(Boolean),
   credentials: true,
