@@ -33,7 +33,7 @@ app.use(helmet());
 
 app.use(cors({
   origin: [
-    "webapp.brothersgroup.au",
+    "https://webapp.brothersgroup.au",
     process.env.ALLOWED_ORIGIN
   ].filter(Boolean),
   credentials: true,
