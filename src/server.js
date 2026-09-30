@@ -33,11 +33,7 @@ app.use(helmet());
 
 app.use(cors({
   origin: [
-    "http://localhost:3000",
-    "http://localhost:8081",
-    "http://localhost:3000/auth/login",
-    "http://localhost:19006",
-    "https://brothersapi-v5im.onrender.com",
+    "webapp.brothersgroup.au",
     process.env.ALLOWED_ORIGIN
   ].filter(Boolean),
   credentials: true,
