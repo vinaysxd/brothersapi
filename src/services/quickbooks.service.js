@@ -16,12 +16,14 @@ export const initOAuthClient = () => {
   });
 };
 
-export const getAuthUrl = () => {
+const QB_STATE = "brothers-cleaning-qb";
+
+export const getAuthUrl = (platform = "mobile") => {
   const oauthClient = initOAuthClient();
 
   const authUrl = oauthClient.authorizeUri({
     scope: [OAuthClient.scopes.Accounting],
-    state: "brothers-cleaning-qb",
+    state: platform === "web" ? `${QB_STATE}:web` : QB_STATE,
   });
 
   console.log("QuickBooks auth URL:", authUrl);
@@ -57,7 +59,7 @@ export const refreshAccessToken = async (refresh_token) => {
 
 const escapeQboString = (value) => String(value).replace(/'/g, "\\'");
 
-const qboRequest = (access_token, path, useSandbox = isSandbox) => {
+const qboRequest = (access_token, path, useSandbox = isSandbox, payload = null) => {
   const hostname = useSandbox
     ? "sandbox-quickbooks.api.intuit.com"
     : "quickbooks.api.intuit.com";
@@ -65,10 +67,14 @@ const qboRequest = (access_token, path, useSandbox = isSandbox) => {
   const options = {
     hostname,
     path,
-    method: "GET",
+    method: payload ? "POST" : "GET",
     headers: {
       Authorization: `Bearer ${access_token}`,
       Accept: "application/json",
+      ...(payload && {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(payload),
+      }),
     },
   };
 
@@ -98,7 +104,7 @@ const qboRequest = (access_token, path, useSandbox = isSandbox) => {
     });
 
     req.on("error", reject);
-    req.end();
+    req.end(payload ?? undefined);
   });
 };
 
@@ -111,7 +117,34 @@ export const getInvoices = async (access_token, realm_id, qb_customer_id, useSan
   return data.QueryResponse?.Invoice ?? [];
 };
 
-export const getInvoiceById = async (access_token, realm_id, qb_invoice_id, useSandbox = isSandbox) => {
+export const getAllInvoices = async (access_token, realm_id, useSandbox = isSandbox) => {
+  const query = "select * from Invoice orderby TxnDate desc maxresults 1000";
+  const path = `/v3/company/${realm_id}/query?query=${encodeURIComponent(query)}&minorversion=65`;
+
+  const data = await qboRequest(access_token, path, useSandbox);
+
+  return data.QueryResponse?.Invoice ?? [];
+};
+
+// Statements need the full history, so this is uncapped (unlike getInvoices).
+export const getCustomerInvoicesAll = async (access_token, realm_id, qb_customer_id, useSandbox = isSandbox) => {
+  const query = `select * from Invoice where CustomerRef = '${escapeQboString(qb_customer_id)}' orderby TxnDate maxresults 1000`;
+  const path = `/v3/company/${realm_id}/query?query=${encodeURIComponent(query)}&minorversion=65`;
+
+  const data = await qboRequest(access_token, path, useSandbox);
+
+  return data.QueryResponse?.Invoice ?? [];
+};
+
+export const createInvoice = async (access_token, realm_id, invoice, useSandbox = isSandbox) => {
+  const path = `/v3/company/${realm_id}/invoice?minorversion=65`;
+
+  const data = await qboRequest(access_token, path, useSandbox, JSON.stringify(invoice));
+
+  return data.Invoice;
+};
+
+export const getInvoiceById =async (access_token, realm_id, qb_invoice_id, useSandbox = isSandbox) => {
   const path = `/v3/company/${realm_id}/invoice/${qb_invoice_id}?minorversion=65`;
 
   const data = await qboRequest(access_token, path, useSandbox);
@@ -119,7 +152,51 @@ export const getInvoiceById = async (access_token, realm_id, qb_invoice_id, useS
   return data.Invoice ?? null;
 };
 
-export const getPayments = async (access_token, realm_id, qb_customer_id, useSandbox = isSandbox) => {
+export const findCustomerIdByEmail = async (access_token, realm_id, email, useSandbox = isSandbox) => {
+  const query = `select * from Customer where PrimaryEmailAddr = '${escapeQboString(email)}'`;
+  const path = `/v3/company/${realm_id}/query?query=${encodeURIComponent(query)}&minorversion=65`;
+
+  const data = await qboRequest(access_token, path, useSandbox);
+
+  return data.QueryResponse?.Customer?.[0]?.Id ?? null;
+};
+
+export const getCustomerEstimates = async (access_token, realm_id, qb_customer_id, useSandbox = isSandbox) => {
+  const query = `select * from Estimate where CustomerRef = '${escapeQboString(qb_customer_id)}' orderby TxnDate desc maxresults 1000`;
+  const path = `/v3/company/${realm_id}/query?query=${encodeURIComponent(query)}&minorversion=65`;
+
+  const data = await qboRequest(access_token, path, useSandbox);
+
+  return data.QueryResponse?.Estimate ?? [];
+};
+
+export const getAllEstimates =async (access_token, realm_id, useSandbox = isSandbox) => {
+  const query = "select * from Estimate orderby TxnDate desc maxresults 1000";
+  const path = `/v3/company/${realm_id}/query?query=${encodeURIComponent(query)}&minorversion=65`;
+
+  const data = await qboRequest(access_token, path, useSandbox);
+
+  return data.QueryResponse?.Estimate ?? [];
+};
+
+export const getAllPayments =async (access_token, realm_id, useSandbox = isSandbox) => {
+  const query = "select * from Payment orderby TxnDate desc maxresults 1000";
+  const path = `/v3/company/${realm_id}/query?query=${encodeURIComponent(query)}&minorversion=65`;
+
+  const data = await qboRequest(access_token, path, useSandbox);
+
+  return data.QueryResponse?.Payment ?? [];
+};
+
+export const createPayment = async (access_token, realm_id, payment, useSandbox = isSandbox) => {
+  const path = `/v3/company/${realm_id}/payment?minorversion=65`;
+
+  const data = await qboRequest(access_token, path, useSandbox, JSON.stringify(payment));
+
+  return data.Payment;
+};
+
+export const getPayments =async (access_token, realm_id, qb_customer_id, useSandbox = isSandbox) => {
   const query = `select * from Payment where CustomerRef = '${escapeQboString(qb_customer_id)}'`;
   const path = `/v3/company/${realm_id}/query?query=${encodeURIComponent(query)}&minorversion=65`;
 

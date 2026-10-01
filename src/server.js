@@ -33,6 +33,7 @@ app.use(helmet());
 
 app.use(cors({
   origin: [
+    "http://localhost:8081",
     "https://webapp.brothersgroup.au",
     "https://ui-tau-puce.vercel.app",
     process.env.ALLOWED_ORIGIN
