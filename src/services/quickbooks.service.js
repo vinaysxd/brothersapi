@@ -170,6 +170,14 @@ export const getCustomerEstimates = async (access_token, realm_id, qb_customer_i
   return data.QueryResponse?.Estimate ?? [];
 };
 
+export const getEstimateById = async (access_token, realm_id, qb_estimate_id, useSandbox = isSandbox) => {
+  const path = `/v3/company/${realm_id}/estimate/${qb_estimate_id}?minorversion=65`;
+
+  const data = await qboRequest(access_token, path, useSandbox);
+
+  return data.Estimate ?? null;
+};
+
 export const getAllEstimates =async (access_token, realm_id, useSandbox = isSandbox) => {
   const query = "select * from Estimate orderby TxnDate desc maxresults 1000";
   const path = `/v3/company/${realm_id}/query?query=${encodeURIComponent(query)}&minorversion=65`;

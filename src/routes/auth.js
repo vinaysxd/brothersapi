@@ -61,7 +61,7 @@ router.post("/login", loginValidators, async (req, res) => {
   const { email, password } = req.body;
 
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-
+  console.log("====")
   if (error || !data?.session || !data?.user) { 
     return res.status(401).json(ERRORS.AUTH_INVALID_CREDENTIALS);
   } 
