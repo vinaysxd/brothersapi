@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js",
+    "dev": "cross-env APP_ENV=development nodemon src/server.js",
+    "start:staging": "cross-env APP_ENV=staging NODE_ENV=production node src/server.js",
+    "start:prod": "cross-env APP_ENV=production NODE_ENV=production node src/server.js",
     "test": "jest --watchAll"
   },
   "keywords": [],
@@ -36,6 +38,7 @@
     "@types/express": "^5.0.6",
     "@types/node": "^26.3.0",
     "babel-jest": "^30.4.1",
+    "cross-env": "^10.1.0",
     "jest": "^30.4.2",
     "supertest": "^7.2.2",
     "tsx": "^4.23.12",
