@@ -62,7 +62,7 @@ router.get("/me", authenticate, async (req, res) => {
     .select("*")
     .eq("id", req.user.id)
     .single();
-
+  console.log("===data = ",profile,profileError)
   if (profileError || !profile) {
     return res.status(404).json(ERRORS.USER_NOT_FOUND);
   }
