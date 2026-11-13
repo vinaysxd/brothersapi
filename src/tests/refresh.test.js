@@ -1,15 +1,16 @@
 import express from "express";
 import request from "supertest";
 import authRoutes from "../routes/auth.js";
-import { supabase } from "../config/supabase.js";
+import { supabaseAuth } from "../config/supabase.js";
 import { ERRORS } from "../constants/errors.js";
 
 jest.mock("../config/supabase.js", () => ({
-  supabase: {
+  supabaseAuth: {
     auth: {
       refreshSession: jest.fn(),
     },
   },
+  supabase: {},
 }));
 
 const buildApp = () => {
@@ -37,7 +38,7 @@ describe("POST /refresh", () => {
 
       expect(res.statusCode).toBe(400);
       expect(res.body).toEqual(ERRORS.VALIDATION_ERROR);
-      expect(supabase.auth.refreshSession).not.toHaveBeenCalled();
+      expect(supabaseAuth.auth.refreshSession).not.toHaveBeenCalled();
     });
 
     it("rejects an empty refresh_token", async () => {
@@ -47,12 +48,12 @@ describe("POST /refresh", () => {
 
       expect(res.statusCode).toBe(400);
       expect(res.body).toEqual(ERRORS.VALIDATION_ERROR);
-      expect(supabase.auth.refreshSession).not.toHaveBeenCalled();
+      expect(supabaseAuth.auth.refreshSession).not.toHaveBeenCalled();
     });
   });
 
   it("returns 401 when supabase rejects the refresh token", async () => {
-    supabase.auth.refreshSession.mockResolvedValue({
+    supabaseAuth.auth.refreshSession.mockResolvedValue({
       data: { user: null, session: null },
       error: { message: "Invalid Refresh Token" },
     });
@@ -61,13 +62,13 @@ describe("POST /refresh", () => {
 
     expect(res.statusCode).toBe(401);
     expect(res.body).toEqual(ERRORS.AUTH_INVALID_REFRESH_TOKEN);
-    expect(supabase.auth.refreshSession).toHaveBeenCalledWith({
+    expect(supabaseAuth.auth.refreshSession).toHaveBeenCalledWith({
       refresh_token: validBody.refresh_token,
     });
   });
 
   it("returns 401 when supabase returns no error but no session/user", async () => {
-    supabase.auth.refreshSession.mockResolvedValue({
+    supabaseAuth.auth.refreshSession.mockResolvedValue({
       data: { user: null, session: null },
       error: null,
     });
@@ -79,7 +80,7 @@ describe("POST /refresh", () => {
   });
 
   it("returns 200 with new tokens and user details on success", async () => {
-    supabase.auth.refreshSession.mockResolvedValue({
+    supabaseAuth.auth.refreshSession.mockResolvedValue({
       data: {
         user: {
           id: "user-1",

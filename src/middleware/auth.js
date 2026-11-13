@@ -1,4 +1,4 @@
-import { supabase } from "../config/supabase.js";
+import { supabaseAuth } from "../config/supabase.js";
 import { ERRORS } from "../constants/errors.js";
 
 export const authenticate = async (req, res, next) => {
@@ -8,7 +8,7 @@ export const authenticate = async (req, res, next) => {
     return res.status(401).json(ERRORS.AUTH_NO_TOKEN);
   }
 
-  const { data, error } = await supabase.auth.getUser(token);
+  const { data, error } = await supabaseAuth.auth.getUser(token);
 
   if (error || !data.user) {
     return res.status(401).json(ERRORS.AUTH_INVALID_TOKEN);

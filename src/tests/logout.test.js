@@ -1,13 +1,17 @@
 import express from "express";
 import request from "supertest";
 import authRoutes from "../routes/auth.js";
-import { supabase } from "../config/supabase.js";
+import { supabase, supabaseAuth } from "../config/supabase.js";
 import { ERRORS } from "../constants/errors.js";
 
 jest.mock("../config/supabase.js", () => ({
-  supabase: {
+  supabaseAuth: {
     auth: {
       getUser: jest.fn(),
+    },
+  },
+  supabase: {
+    auth: {
       admin: {
         signOut: jest.fn(),
       },
@@ -25,7 +29,7 @@ const buildApp = () => {
 const MOCK_USER = { id: "user-1", email: "user@example.com", app_metadata: { role: "staff" } };
 
 const asUser = (user) => {
-  supabase.auth.getUser.mockResolvedValue({ data: { user }, error: null });
+  supabaseAuth.auth.getUser.mockResolvedValue({ data: { user }, error: null });
   return { Authorization: "Bearer valid-token" };
 };
 
@@ -46,7 +50,7 @@ describe("POST /logout", () => {
   });
 
   it("blocks requests with an invalid token", async () => {
-    supabase.auth.getUser.mockResolvedValue({
+    supabaseAuth.auth.getUser.mockResolvedValue({
       data: { user: null },
       error: { message: "Invalid token" },
     });
