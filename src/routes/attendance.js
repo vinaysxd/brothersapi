@@ -1054,11 +1054,11 @@ router.get("/photos/:attendance_id", authenticate, requireRole("staff"), async (
 const DEFAULT_PAGE_LIMIT = 10;
 const MAX_PAGE_LIMIT = 100;
 
-const parsePagination = (query, maxLimit = MAX_PAGE_LIMIT) => {
+const parsePagination = (query, maxLimit = MAX_PAGE_LIMIT, defaultLimit = DEFAULT_PAGE_LIMIT) => {
   const parsedPage = parseInt(query.page, 10);
   const parsedLimit = parseInt(query.limit, 10);
   const page = parsedPage >= 1 ? parsedPage : 1;
-  const limit = parsedLimit >= 1 ? Math.min(parsedLimit, maxLimit) : DEFAULT_PAGE_LIMIT;
+  const limit = parsedLimit >= 1 ? Math.min(parsedLimit, maxLimit) : defaultLimit;
   const from = (page - 1) * limit;
   return { page, limit, from, to: from + limit - 1 };
 };
@@ -1227,6 +1227,47 @@ router.get("/site/:site_id", authenticate, requireRole("admin"), async (req, res
 });
 
 const MAX_RECENT_LIMIT = 50;
+const DEFAULT_RECENT_LIMIT = 20;
+const LONG_SHIFT_HOURS = 16;
+const MS_PER_HOUR = 60 * 60 * 1000;
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+// Derived from clock_in / clock_out only; nothing is stored.
+const withStatus = (row) => {
+  if (row.clock_out) {
+    return { ...row, status: "clocked_out" };
+  }
+
+  if (!row.clock_in) {
+    return row;
+  }
+
+  const hoursElapsed = (Date.now() - new Date(row.clock_in).getTime()) / MS_PER_HOUR;
+
+  if (hoursElapsed >= LONG_SHIFT_HOURS) {
+    return {
+      ...row,
+      status: "long_shift",
+      alert: true,
+      alert_message: `Clocked in for ${Math.round(hoursElapsed * 10) / 10} hours`,
+    };
+  }
+
+  return { ...row, status: "clocked_in" };
+};
+
+// Returns an ISO timestamp for a "from"/"to" query value, or null if it is not a valid date.
+// A date-only "to" covers the whole day.
+const parseDateFilter = (value, endOfDay = false) => {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const isDateOnly = DATE_ONLY_PATTERN.test(value);
+  const date = new Date(isDateOnly ? `${value}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z` : value);
+
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+};
 
 /**
  * @swagger
@@ -1270,11 +1311,35 @@ const MAX_RECENT_LIMIT = 50;
  *             example: { code: "SRV_001", message: "Internal server error" }
  */
 router.get("/recent", authenticate, requireRole("admin"), async (req, res) => {
-  const pagination = parsePagination(req.query, MAX_RECENT_LIMIT);
+  const pagination = parsePagination(req.query, MAX_RECENT_LIMIT, DEFAULT_RECENT_LIMIT);
+  const { staff_id, site_id, from, to } = req.query;
 
-  const { data: attendanceRows, count, error: attendanceError } = await supabase
-    .from("attendance")
-    .select("*", { count: "exact" })
+  const fromDate = from === undefined ? null : parseDateFilter(from);
+  const toDate = to === undefined ? null : parseDateFilter(to, true);
+
+  if ((from !== undefined && !fromDate) || (to !== undefined && !toDate)) {
+    return res.status(400).json(ERRORS.VALIDATION_ERROR);
+  }
+
+  let query = supabase.from("attendance").select("*", { count: "exact" });
+
+  if (staff_id) {
+    query = query.eq("staff_id", staff_id);
+  }
+
+  if (site_id) {
+    query = query.eq("site_id", site_id);
+  }
+
+  if (fromDate) {
+    query = query.gte("clock_in", fromDate);
+  }
+
+  if (toDate) {
+    query = query.lte("clock_in", toDate);
+  }
+
+  const { data: attendanceRows, count, error: attendanceError } = await query
     .order("clock_in", { ascending: false })
     .range(pagination.from, pagination.to);
 
@@ -1300,14 +1365,15 @@ router.get("/recent", authenticate, requireRole("admin"), async (req, res) => {
     return res.status(500).json(ERRORS.SERVER_ERROR);
   }
 
-  const attendance = attendanceRows.map((row) => ({
+  const attendance = attendanceRows.map((row) => withStatus({
     ...row,
     staff: staffById[row.staff_id] ?? null,
     site: sitesById[row.site_id] ?? null,
     photos: photosByAttendanceId[row.id] ?? [],
   }));
 
-  return res.status(200).json(attendanceResponse(attendance, pagination, count));
+  // "attendance" is the existing contract used by the app; "data" is an alias of it.
+  return res.status(200).json({ ...attendanceResponse(attendance, pagination, count), data: attendance });
 });
 
 /**

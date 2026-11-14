@@ -7,9 +7,17 @@ console.log('SUPABASE_URL:', supabaseUrl);
 console.log('SERVICE_KEY loaded:', !!supabaseServiceKey);
 console.log('SERVICE_KEY prefix:', supabaseServiceKey?.substring(0, 20));
 
-export const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+const clientOptions = {
   auth: {
     autoRefreshToken: false,
-    persistSession: false
-  }
-});
+    persistSession: false,
+    detectSessionInUrl: false,
+  },
+};
+
+// Database queries only.
+export const supabase = createClient(supabaseUrl, supabaseServiceKey, clientOptions);
+
+// Auth operations (e.g. getUser). Kept separate so auth session state
+// can't leak into the client used for database queries.
+export const supabaseAuth = createClient(supabaseUrl, supabaseServiceKey, clientOptions);

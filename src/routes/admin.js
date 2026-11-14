@@ -243,6 +243,9 @@ router.post(
  *             example: { code: "SRV_001", message: "Internal server error" }
  */
 router.get("/staff", authenticate, requireRole("admin"), async (req, res) => {
+  // console.log('Supabase client role check - user:', user);
+console.log('Supabase URL in use:', supabase.supabaseUrl);
+
   const { data: profiles, error: profilesError } = await supabase
     .from("profiles")
     .select("*")
@@ -250,6 +253,7 @@ router.get("/staff", authenticate, requireRole("admin"), async (req, res) => {
     .order("is_active", { ascending: false });
 
   if (profilesError) {
+    console.log(profilesError)
     return res.status(500).json(ERRORS.SERVER_ERROR);
   }
 

@@ -1,14 +1,16 @@
 import express from "express";
 import request from "supertest";
 import profileRoutes from "../routes/profile.js";
-import { supabase } from "../config/supabase.js";
+import { supabase, supabaseAuth } from "../config/supabase.js";
 import { ERRORS } from "../constants/errors.js";
 
 jest.mock("../config/supabase.js", () => ({
-  supabase: {
+  supabaseAuth: {
     auth: {
       getUser: jest.fn(),
     },
+  },
+  supabase: {
     from: jest.fn(),
     storage: {
       from: jest.fn(),
@@ -28,7 +30,7 @@ const buildApp = () => {
 };
 
 const asUser = (user) => {
-  supabase.auth.getUser.mockResolvedValue({ data: { user }, error: null });
+  supabaseAuth.auth.getUser.mockResolvedValue({ data: { user }, error: null });
   return { Authorization: "Bearer valid-token" };
 };
 

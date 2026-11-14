@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { body, validationResult } from "express-validator";
-import { supabase } from "../config/supabase.js";
+import { supabase, supabaseAuth } from "../config/supabase.js";
 import { authenticate } from "../middleware/auth.js";
 import { ERRORS } from "../constants/errors.js";
 
@@ -60,7 +60,7 @@ router.post("/login", loginValidators, async (req, res) => {
 
   const { email, password } = req.body;
 
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabaseAuth.auth.signInWithPassword({ email, password });
   console.log("====")
   if (error || !data?.session || !data?.user) { 
     return res.status(401).json(ERRORS.AUTH_INVALID_CREDENTIALS);
@@ -134,7 +134,7 @@ router.post("/set-password", setPasswordValidators, async (req, res) => {
 
   const { token, password } = req.body;
 
-  const { data, error } = await supabase.auth.getUser(token);
+  const { data, error } = await supabaseAuth.auth.getUser(token);
 
   if (error || !data?.user) {
     return res.status(401).json(ERRORS.AUTH_INVALID_TOKEN);
@@ -211,7 +211,7 @@ router.post("/refresh", refreshValidators, async (req, res) => {
 
   const { refresh_token } = req.body;
 
-  const { data, error } = await supabase.auth.refreshSession({ refresh_token });
+  const { data, error } = await supabaseAuth.auth.refreshSession({ refresh_token });
 
   if (error || !data?.session || !data?.user) {
     return res.status(401).json(ERRORS.AUTH_INVALID_REFRESH_TOKEN);

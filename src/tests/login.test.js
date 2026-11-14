@@ -1,15 +1,16 @@
 import express from "express";
 import request from "supertest";
 import authRoutes from "../routes/auth.js";
-import { supabase } from "../config/supabase.js";
+import { supabaseAuth } from "../config/supabase.js";
 import { ERRORS } from "../constants/errors.js";
 
 jest.mock("../config/supabase.js", () => ({
-  supabase: {
+  supabaseAuth: {
     auth: {
       signInWithPassword: jest.fn(),
     },
   },
+  supabase: {},
 }));
 
 const buildApp = () => {
@@ -40,7 +41,7 @@ describe("POST /login", () => {
 
       expect(res.statusCode).toBe(400);
       expect(res.body).toEqual(ERRORS.VALIDATION_ERROR);
-      expect(supabase.auth.signInWithPassword).not.toHaveBeenCalled();
+      expect(supabaseAuth.auth.signInWithPassword).not.toHaveBeenCalled();
     });
 
     it("rejects an invalid email", async () => {
@@ -72,7 +73,7 @@ describe("POST /login", () => {
   });
 
   it("returns 401 when supabase rejects the credentials", async () => {
-    supabase.auth.signInWithPassword.mockResolvedValue({
+    supabaseAuth.auth.signInWithPassword.mockResolvedValue({
       data: { user: null, session: null },
       error: { message: "Invalid login credentials" },
     });
@@ -81,14 +82,14 @@ describe("POST /login", () => {
 
     expect(res.statusCode).toBe(401);
     expect(res.body).toEqual(ERRORS.AUTH_INVALID_CREDENTIALS);
-    expect(supabase.auth.signInWithPassword).toHaveBeenCalledWith({
+    expect(supabaseAuth.auth.signInWithPassword).toHaveBeenCalledWith({
       email: validBody.email,
       password: validBody.password,
     });
   });
 
   it("returns 401 when supabase returns no error but no session/user", async () => {
-    supabase.auth.signInWithPassword.mockResolvedValue({
+    supabaseAuth.auth.signInWithPassword.mockResolvedValue({
       data: { user: null, session: null },
       error: null,
     });
@@ -100,7 +101,7 @@ describe("POST /login", () => {
   });
 
   it("returns 200 with access_token and user details on success", async () => {
-    supabase.auth.signInWithPassword.mockResolvedValue({
+    supabaseAuth.auth.signInWithPassword.mockResolvedValue({
       data: {
         user: {
           id: "user-1",
@@ -128,7 +129,7 @@ describe("POST /login", () => {
   });
 
   it("always includes role in the response, as null when app_metadata has no role", async () => {
-    supabase.auth.signInWithPassword.mockResolvedValue({
+    supabaseAuth.auth.signInWithPassword.mockResolvedValue({
       data: {
         user: {
           id: "user-1",
