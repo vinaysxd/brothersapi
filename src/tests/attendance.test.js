@@ -44,6 +44,7 @@ const chain = (result) => {
   builder.is = jest.fn(() => builder);
   builder.gte = jest.fn(() => builder);
   builder.lt = jest.fn(() => builder);
+  builder.lte = jest.fn(() => builder);
   builder.order = jest.fn(() => builder);
   builder.limit = jest.fn(() => builder);
   builder.range = jest.fn(() => builder);
@@ -1478,7 +1479,7 @@ describe("GET /attendance/recent", () => {
     const res = await request(app).get("/recent").set(headers);
 
     expect(res.statusCode).toBe(200);
-    expect(res.body).toEqual({ attendance: [], total: 0, page: 1, limit: 10, totalPages: 0 });
+    expect(res.body).toEqual({ attendance: [], data: [], total: 0, page: 1, limit: 20, totalPages: 0 });
     expect(supabase.from).toHaveBeenCalledTimes(1);
   });
 
@@ -1527,7 +1528,7 @@ describe("GET /attendance/recent", () => {
     expect(res.body).toEqual(ERRORS.SERVER_ERROR);
   });
 
-  it("returns recent attendance with staff, site details and photos, defaulting the limit to 10", async () => {
+  it("returns recent attendance with staff, site details and photos, defaulting the limit to 20", async () => {
     const headers = asUser(ADMIN_USER);
     const attendanceChain = chain({
       data: [
@@ -1536,6 +1537,7 @@ describe("GET /attendance/recent", () => {
           staff_id: "staff-1",
           site_id: "site-1",
           clock_in: "2026-08-31T09:00:00.000Z",
+          clock_out: "2026-08-31T17:00:00.000Z",
         },
       ],
       count: 1,
@@ -1560,12 +1562,14 @@ describe("GET /attendance/recent", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual({
+      data: expect.any(Array),
       attendance: [
         {
           id: "att-1",
           staff_id: "staff-1",
           site_id: "site-1",
           clock_in: "2026-08-31T09:00:00.000Z",
+          clock_out: "2026-08-31T17:00:00.000Z",
           staff: {
             id: "staff-1",
             full_name: "Staff One",
@@ -1574,16 +1578,18 @@ describe("GET /attendance/recent", () => {
           },
           site: { id: "site-1", name: "Site One", address: "1 Main St" },
           photos: [{ id: "photo-1", attendance_id: "att-1" }],
+          status: "clocked_out",
         },
       ],
       total: 1,
       page: 1,
-      limit: 10,
+      limit: 20,
       totalPages: 1,
     });
+    expect(res.body.data).toEqual(res.body.attendance);
     expect(attendanceChain.select).toHaveBeenCalledWith("*", { count: "exact" });
     expect(attendanceChain.order).toHaveBeenCalledWith("clock_in", { ascending: false });
-    expect(attendanceChain.range).toHaveBeenCalledWith(0, 9);
+    expect(attendanceChain.range).toHaveBeenCalledWith(0, 19);
   });
 
   it("uses the limit query param when provided", async () => {
@@ -1606,7 +1612,7 @@ describe("GET /attendance/recent", () => {
 
     expect(res.statusCode).toBe(200);
     expect(attendanceChain.range).toHaveBeenCalledWith(20, 29);
-    expect(res.body).toEqual({ attendance: [], total: 23, page: 3, limit: 10, totalPages: 3 });
+    expect(res.body).toEqual({ attendance: [], data: [], total: 23, page: 3, limit: 10, totalPages: 3 });
   });
 
   it("caps the limit query param at 50", async () => {
@@ -1628,7 +1634,73 @@ describe("GET /attendance/recent", () => {
     const res = await request(app).get("/recent?limit=not-a-number").set(headers);
 
     expect(res.statusCode).toBe(200);
-    expect(attendanceChain.range).toHaveBeenCalledWith(0, 9);
+    expect(attendanceChain.range).toHaveBeenCalledWith(0, 19);
+  });
+
+  it("applies staff_id, site_id, from and to filters only when provided", async () => {
+    const headers = asUser(ADMIN_USER);
+    const filtered = chain({ data: [], error: null });
+    supabase.from.mockReturnValueOnce(filtered);
+
+    const res = await request(app)
+      .get("/recent?staff_id=staff-1&site_id=site-1&from=2026-08-01&to=2026-08-31")
+      .set(headers);
+
+    expect(res.statusCode).toBe(200);
+    expect(filtered.eq).toHaveBeenCalledWith("staff_id", "staff-1");
+    expect(filtered.eq).toHaveBeenCalledWith("site_id", "site-1");
+    expect(filtered.gte).toHaveBeenCalledWith("clock_in", "2026-08-01T00:00:00.000Z");
+    expect(filtered.lte).toHaveBeenCalledWith("clock_in", "2026-08-31T23:59:59.999Z");
+
+    const unfiltered = chain({ data: [], error: null });
+    supabase.from.mockReturnValueOnce(unfiltered);
+
+    await request(app).get("/recent").set(headers);
+
+    expect(unfiltered.eq).not.toHaveBeenCalled();
+    expect(unfiltered.gte).not.toHaveBeenCalled();
+    expect(unfiltered.lte).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 for an invalid from/to date", async () => {
+    const headers = asUser(ADMIN_USER);
+
+    const res = await request(app).get("/recent?from=not-a-date").set(headers);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual(ERRORS.VALIDATION_ERROR);
+    expect(supabase.from).not.toHaveBeenCalled();
+  });
+
+  it("computes clocked_in, clocked_out and long_shift statuses", async () => {
+    const headers = asUser(ADMIN_USER);
+    const hoursAgo = (h) => new Date(Date.now() - h * 60 * 60 * 1000).toISOString();
+    supabase.from
+      .mockReturnValueOnce(
+        chain({
+          data: [
+            { id: "a1", staff_id: "s1", site_id: "site-1", clock_in: hoursAgo(2), clock_out: null },
+            { id: "a2", staff_id: "s1", site_id: "site-1", clock_in: hoursAgo(10), clock_out: hoursAgo(2) },
+            { id: "a3", staff_id: "s1", site_id: "site-1", clock_in: hoursAgo(20), clock_out: null },
+          ],
+          count: 3,
+          error: null,
+        })
+      )
+      .mockReturnValueOnce(chain({ data: [{ id: "s1", full_name: "Staff One" }], error: null }))
+      .mockReturnValueOnce(chain({ data: [{ id: "site-1", name: "Site One" }], error: null }))
+      .mockReturnValueOnce(chain({ data: [], error: null }));
+
+    const res = await request(app).get("/recent").set(headers);
+
+    expect(res.statusCode).toBe(200);
+    const [a1, a2, a3] = res.body.attendance;
+    expect(a1.status).toBe("clocked_in");
+    expect(a1.alert).toBeUndefined();
+    expect(a2.status).toBe("clocked_out");
+    expect(a3.status).toBe("long_shift");
+    expect(a3.alert).toBe(true);
+    expect(a3.alert_message).toBe("Clocked in for 20 hours");
   });
 });
 
