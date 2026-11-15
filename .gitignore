@@ -1,2 +1,7 @@
+# Ignore all .env files (including .env.local, .env.production, etc.)
 .env
+.env*
+
+# Optional: Keep an example template tracked for other developers
+!.env.example
 node_modules
