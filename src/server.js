@@ -1,4 +1,4 @@
-import "dotenv/config";
+import './env.js';
 import path from "node:path";
 import express from "express";
 import helmet from "helmet";
@@ -31,13 +31,13 @@ const app = express();
 app.set('trust proxy', 1);
 app.use(helmet());
 
+const allowedOrigins = (process.env.ALLOWED_ORIGIN || "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
 app.use(cors({
-  origin: [
-    "http://localhost:8081",
-    "https://webapp.brothersgroup.au",
-    "https://ui-tau-puce.vercel.app",
-    process.env.ALLOWED_ORIGIN
-  ].filter(Boolean),
+  origin: allowedOrigins,
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]

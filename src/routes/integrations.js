@@ -16,6 +16,7 @@ import {
   getAllPayments,
   findCustomerIdByEmail,
   getCustomerEstimates,
+  getEstimateById,
 } from "../services/quickbooks.service.js";
 import { supabase } from "../config/supabase.js";
 import { authenticate } from "../middleware/auth.js";
@@ -1042,6 +1043,94 @@ router.get(
       console.error("Failed to fetch QuickBooks client statement:", JSON.stringify(err?.Fault ?? err?.message ?? err));
       return res.status(500).json(ERRORS.SERVER_ERROR);
     }
+  }
+);
+
+/**
+ * @swagger
+ * /integrations/quickbooks/estimates/{id}/pdf:
+ *   get:
+ *     summary: Download a QuickBooks estimate PDF (admin - any estimate; client - own estimates)
+ *     tags: [Integrations]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Estimate PDF
+ *         content:
+ *           application/pdf: {}
+ *       400:
+ *         description: Invalid estimate id
+ *       403:
+ *         description: Estimate does not belong to this client
+ *       404:
+ *         description: No QuickBooks account linked, or estimate not found
+ *       500:
+ *         description: Server error
+ *       502:
+ *         description: Failed to fetch estimate PDF from QuickBooks
+ */
+router.get(
+  "/quickbooks/estimates/:id/pdf",
+  authenticate,
+  requireRole("admin", "client"),
+  qbAuth,
+  async (req, res) => {
+    const { id } = req.params;
+
+    if (!/^\d+$/.test(id)) {
+      return res.status(400).json(ERRORS.VALIDATION_ERROR);
+    }
+
+    if (req.user.app_metadata?.role === "client") {
+      try {
+        const qb_customer_id = await resolveClientQbCustomerId(req);
+
+        if (!qb_customer_id) {
+          return res.status(404).json({ code: "QBO_003", message: "No QuickBooks account linked" });
+        }
+
+        const estimate = await getEstimateById(req.qb.access_token, req.qb.realm_id, id);
+
+        if (!estimate) {
+          return res.status(404).json(ERRORS.NOT_FOUND);
+        }
+
+        if (estimate.CustomerRef?.value !== qb_customer_id) {
+          return res.status(403).json(ERRORS.AUTH_UNAUTHORIZED);
+        }
+      } catch (err) {
+        console.error("Failed to fetch QuickBooks estimate:", JSON.stringify(err?.Fault ?? err?.message ?? err));
+        return res.status(500).json(ERRORS.SERVER_ERROR);
+      }
+    }
+
+    const qbo = new QuickBooks(
+      QB_CLIENT_ID,
+      QB_CLIENT_SECRET,
+      req.qb.access_token,
+      false,
+      req.qb.realm_id,
+      isSandbox,
+      false,
+      null,
+      "2.0",
+      null
+    );
+
+    qbo.getEstimatePdf(id, (err, pdf) => {
+      if (err || !pdf) {
+        console.error("Failed to fetch QuickBooks estimate PDF:", JSON.stringify(err?.Fault ?? err?.message ?? err));
+        return res.status(502).json({ code: "QBO_004", message: "Failed to fetch estimate PDF" });
+      }
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="estimate-${id}.pdf"`);
+      return res.status(200).send(Buffer.from(pdf));
+    });
   }
 );
 

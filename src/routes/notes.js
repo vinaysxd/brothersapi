@@ -30,6 +30,17 @@ const attachAuthors = async (noteRows) => {
   return { authorsById: Object.fromEntries(authors.map((author) => [author.id, author])) };
 };
 
+// Same shape as the GET endpoints, so a freshly created note renders with its author.
+const withAuthor = async (noteRow) => {
+  const { authorsById, error } = await attachAuthors([noteRow]);
+
+  if (error) {
+    return { error };
+  }
+
+  return { note: { ...noteRow, author: authorsById[noteRow.author_id] ?? null } };
+};
+
 /**
  * @swagger
  * /notes/{site_id}:
@@ -118,7 +129,13 @@ router.post("/:site_id", authenticate, requireRole("staff"), noteValidators, asy
     return res.status(500).json(ERRORS.SERVER_ERROR);
   }
 
-  return res.status(201).json({ note: noteRow });
+  const { note: noteWithAuthor, error: authorError } = await withAuthor(noteRow);
+
+  if (authorError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  return res.status(201).json({ note: noteWithAuthor });
 });
 
 /**
@@ -234,9 +251,97 @@ router.post(
       return res.status(500).json(ERRORS.SERVER_ERROR);
     }
 
-    return res.status(201).json({ note: noteRow });
+    const { note: noteWithAuthor, error: authorError } = await withAuthor(noteRow);
+
+    if (authorError) {
+      return res.status(500).json(ERRORS.SERVER_ERROR);
+    }
+
+    return res.status(201).json({ note: noteWithAuthor });
   }
 );
+
+/**
+ * @swagger
+ * /notes/{site_id}/admin:
+ *   post:
+ *     summary: Add an admin note to any site
+ *     tags: [Notes]
+ *     parameters:
+ *       - in: path
+ *         name: site_id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [note]
+ *             properties:
+ *               note: { type: string, minLength: 1 }
+ *     responses:
+ *       201:
+ *         description: Note created
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 note: { $ref: '#/components/schemas/SiteNote' }
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "VAL_001", message: "Validation error" }
+ *       401:
+ *         description: No token provided or invalid token
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_001", message: "No token provided" }
+ *       403:
+ *         description: Caller is not an admin
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "AUTH_003", message: "Unauthorized access" }
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *             example: { code: "SRV_001", message: "Internal server error" }
+ */
+router.post("/:site_id/admin", authenticate, requireRole("admin"), noteValidators, async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json(ERRORS.VALIDATION_ERROR);
+  }
+
+  const { site_id } = req.params;
+  const { note } = req.body;
+
+  const { data: noteRow, error: insertError } = await supabase
+    .from("site_notes")
+    .insert({ author_id: req.user.id, site_id, note, type: "admin" })
+    .select()
+    .single();
+
+  if (insertError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  const { note: noteWithAuthor, error: authorError } = await withAuthor(noteRow);
+
+  if (authorError) {
+    return res.status(500).json(ERRORS.SERVER_ERROR);
+  }
+
+  return res.status(201).json({ note: noteWithAuthor });
+});
 
 /**
  * @swagger

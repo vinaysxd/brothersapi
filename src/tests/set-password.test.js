@@ -1,13 +1,17 @@
 import express from "express";
 import request from "supertest";
 import authRoutes from "../routes/auth.js";
-import { supabase } from "../config/supabase.js";
+import { supabase, supabaseAuth } from "../config/supabase.js";
 import { ERRORS } from "../constants/errors.js";
 
 jest.mock("../config/supabase.js", () => ({
-  supabase: {
+  supabaseAuth: {
     auth: {
       getUser: jest.fn(),
+    },
+  },
+  supabase: {
+    auth: {
       admin: {
         updateUserById: jest.fn(),
       },
@@ -52,7 +56,7 @@ describe("POST /set-password", () => {
 
       expect(res.statusCode).toBe(400);
       expect(res.body).toEqual(ERRORS.VALIDATION_ERROR);
-      expect(supabase.auth.getUser).not.toHaveBeenCalled();
+      expect(supabaseAuth.auth.getUser).not.toHaveBeenCalled();
     });
 
     it("rejects a missing password", async () => {
@@ -75,7 +79,7 @@ describe("POST /set-password", () => {
   });
 
   it("returns 401 when the token is invalid or expired", async () => {
-    supabase.auth.getUser.mockResolvedValue({
+    supabaseAuth.auth.getUser.mockResolvedValue({
       data: { user: null },
       error: { message: "Invalid token" },
     });
@@ -84,12 +88,12 @@ describe("POST /set-password", () => {
 
     expect(res.statusCode).toBe(401);
     expect(res.body).toEqual(ERRORS.AUTH_INVALID_TOKEN);
-    expect(supabase.auth.getUser).toHaveBeenCalledWith(validBody.token);
+    expect(supabaseAuth.auth.getUser).toHaveBeenCalledWith(validBody.token);
     expect(supabase.auth.admin.updateUserById).not.toHaveBeenCalled();
   });
 
   it("returns 401 when getUser returns no error but no user", async () => {
-    supabase.auth.getUser.mockResolvedValue({
+    supabaseAuth.auth.getUser.mockResolvedValue({
       data: { user: null },
       error: null,
     });
@@ -101,7 +105,7 @@ describe("POST /set-password", () => {
   });
 
   it("returns 500 when updateUserById fails", async () => {
-    supabase.auth.getUser.mockResolvedValue({
+    supabaseAuth.auth.getUser.mockResolvedValue({
       data: { user: { id: "user-1" } },
       error: null,
     });
@@ -120,7 +124,7 @@ describe("POST /set-password", () => {
   });
 
   it("returns 500 when activating the profile fails", async () => {
-    supabase.auth.getUser.mockResolvedValue({
+    supabaseAuth.auth.getUser.mockResolvedValue({
       data: { user: { id: "user-1" } },
       error: null,
     });
@@ -139,7 +143,7 @@ describe("POST /set-password", () => {
   });
 
   it("returns 200 on success and activates the profile", async () => {
-    supabase.auth.getUser.mockResolvedValue({
+    supabaseAuth.auth.getUser.mockResolvedValue({
       data: { user: { id: "user-1" } },
       error: null,
     });

@@ -1,14 +1,16 @@
 import express from "express";
 import request from "supertest";
 import notesRoutes from "../routes/notes.js";
-import { supabase } from "../config/supabase.js";
+import { supabase, supabaseAuth } from "../config/supabase.js";
 import { ERRORS } from "../constants/errors.js";
 
 jest.mock("../config/supabase.js", () => ({
-  supabase: {
+  supabaseAuth: {
     auth: {
       getUser: jest.fn(),
     },
+  },
+  supabase: {
     from: jest.fn(),
   },
 }));
@@ -25,7 +27,7 @@ const buildApp = () => {
 };
 
 const asUser = (user) => {
-  supabase.auth.getUser.mockResolvedValue({ data: { user }, error: null });
+  supabaseAuth.auth.getUser.mockResolvedValue({ data: { user }, error: null });
   return { Authorization: "Bearer valid-token" };
 };
 
@@ -125,7 +127,8 @@ describe("POST /notes/:site_id", () => {
     });
     supabase.from
       .mockReturnValueOnce(chain({ data: { site_id: "site-1" }, error: null }))
-      .mockReturnValueOnce(insertChain);
+      .mockReturnValueOnce(insertChain)
+      .mockReturnValueOnce(chain({ data: [{ id: "staff-1", full_name: "Staff One", email: "staff-1@example.com", phone: "555-0100", role: "staff" }], error: null }));
 
     const res = await request(app).post("/site-1").set(headers).send({ note: "All good" });
 
@@ -136,6 +139,7 @@ describe("POST /notes/:site_id", () => {
       site_id: "site-1",
       note: "All good",
       type: "staff",
+      author: { id: "staff-1", full_name: "Staff One", email: "staff-1@example.com", phone: "555-0100", role: "staff" },
     });
     expect(insertChain.insert).toHaveBeenCalledWith({
       author_id: "staff-1",
@@ -244,7 +248,8 @@ describe("POST /notes/:site_id/client", () => {
     supabase.from
       .mockReturnValueOnce(chain({ data: { id: "cp-1" }, error: null }))
       .mockReturnValueOnce(chain({ data: { id: "site-1" }, error: null }))
-      .mockReturnValueOnce(insertChain);
+      .mockReturnValueOnce(insertChain)
+      .mockReturnValueOnce(chain({ data: [{ id: "client-user-1", full_name: "Client One", email: "client-user-1@example.com", phone: "555-0100", role: "client" }], error: null }));
 
     const res = await request(app).post("/site-1/client").set(headers).send({ note: "All good" });
 
@@ -255,6 +260,7 @@ describe("POST /notes/:site_id/client", () => {
       site_id: "site-1",
       note: "All good",
       type: "client",
+      author: { id: "client-user-1", full_name: "Client One", email: "client-user-1@example.com", phone: "555-0100", role: "client" },
     });
     expect(insertChain.insert).toHaveBeenCalledWith({
       author_id: "client-user-1",
@@ -262,6 +268,81 @@ describe("POST /notes/:site_id/client", () => {
       note: "All good",
       type: "client",
     });
+  });
+});
+
+describe("POST /notes/:site_id/admin", () => {
+  it("blocks requests with no token", async () => {
+    const res = await request(app).post("/site-1/admin").send({ note: "Hello" });
+
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual(ERRORS.AUTH_NO_TOKEN);
+  });
+
+  it("blocks non-admin users", async () => {
+    for (const user of [STAFF_USER, CLIENT_USER]) {
+      const headers = asUser(user);
+
+      const res = await request(app).post("/site-1/admin").set(headers).send({ note: "Hello" });
+
+      expect(res.statusCode).toBe(403);
+      expect(res.body).toEqual(ERRORS.AUTH_UNAUTHORIZED);
+    }
+  });
+
+  it("rejects a missing or empty note", async () => {
+    const headers = asUser(ADMIN_USER);
+
+    const missing = await request(app).post("/site-1/admin").set(headers).send({});
+    const empty = await request(app).post("/site-1/admin").set(headers).send({ note: "   " });
+
+    expect(missing.statusCode).toBe(400);
+    expect(empty.statusCode).toBe(400);
+    expect(missing.body).toEqual(ERRORS.VALIDATION_ERROR);
+    expect(supabase.from).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 when the insert fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from.mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).post("/site-1/admin").set(headers).send({ note: "Hello" });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
+  });
+
+  it("creates an admin note for any site without an ownership check", async () => {
+    const headers = asUser(ADMIN_USER);
+    const row = { id: "note-1", author_id: "admin-1", site_id: "site-1", note: "Hello", type: "admin" };
+    const insertChain = chain({ data: row, error: null });
+    supabase.from
+      .mockReturnValueOnce(insertChain)
+      .mockReturnValueOnce(chain({ data: [{ id: "admin-1", full_name: "Admin One", email: "admin-1@example.com", phone: "555-0100", role: "admin" }], error: null }));
+
+    const res = await request(app).post("/site-1/admin").set(headers).send({ note: "Hello" });
+
+    expect(res.statusCode).toBe(201);
+    expect(res.body).toEqual({ note: { ...row, author: { id: "admin-1", full_name: "Admin One", email: "admin-1@example.com", phone: "555-0100", role: "admin" } } });
+    expect(insertChain.insert).toHaveBeenCalledWith({
+      author_id: "admin-1",
+      site_id: "site-1",
+      note: "Hello",
+      type: "admin",
+    });
+    expect(supabase.from).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns 500 when fetching the author fails", async () => {
+    const headers = asUser(ADMIN_USER);
+    supabase.from
+      .mockReturnValueOnce(chain({ data: { id: "note-1", author_id: "admin-1" }, error: null }))
+      .mockReturnValueOnce(chain({ data: null, error: { message: "fail" } }));
+
+    const res = await request(app).post("/site-1/admin").set(headers).send({ note: "Hello" });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual(ERRORS.SERVER_ERROR);
   });
 });
 
